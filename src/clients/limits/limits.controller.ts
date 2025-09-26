@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -21,7 +20,24 @@ import {
 export class LimitsController {
   constructor(private readonly svc: LimitsService) {}
 
-  /** Crear/actualizar límite de un producto */
+  /**
+   * Listar límites de un cliente.
+   * Filtros opcionales: productId, periodKind ('day'|'week'|'month'), onlyActive
+   * GET /api/clients/:clientId/limits?productId=2&periodKind=month&onlyActive=true
+   */
+  @Get(':clientId/limits')
+  async list(
+    @Param('clientId', ParseIntPipe) clientId: number,
+    @Query() query: ListLimitsQueryDto,
+  ) {
+    return this.svc.list(clientId, query);
+  }
+
+  /**
+   * Crear/actualizar límite de un producto (por período).
+   * PUT /api/clients/:clientId/limits/products/:productId
+   * Body: { periodKind, maxGallons, applyToAllPayments?, isActive? }
+   */
   @Put(':clientId/limits/products/:productId')
   async upsert(
     @Param('clientId', ParseIntPipe) clientId: number,
@@ -31,53 +47,21 @@ export class LimitsController {
     return this.svc.upsertLimit(clientId, productId, dto);
   }
 
-  /** Activar/desactivar (opcionalmente con ?period=month para afectar uno solo) */
+  /**
+   * Activar / desactivar límite(s) de un producto.
+   * - Si pasas ?period=month afecta SOLO ese período.
+   * - Si omites ?period, afecta TODOS los períodos de ese producto para ese cliente.
+   *
+   * PATCH /api/clients/:clientId/limits/products/:productId/active?period=month
+   * Body: { isActive: true | false }
+   */
   @Patch(':clientId/limits/products/:productId/active')
-  async setActive(
+  async patchActive(
     @Param('clientId', ParseIntPipe) clientId: number,
     @Param('productId', ParseIntPipe) productId: number,
-    @Body() body: PatchActiveDto,
-    @Query('period') period?: PeriodKind,
+    @Query('period') periodKind: PeriodKind | undefined,
+    @Body() dto: PatchActiveDto,
   ) {
-    return this.svc.setActive(clientId, productId, body, period);
-  }
-
-  /** Listar límites del cliente (filtros: period, active) */
-  @Get(':clientId/limits/products')
-  async list(
-    @Param('clientId', ParseIntPipe) clientId: number,
-    @Query() q: ListLimitsQueryDto,
-  ) {
-    return this.svc.listByClient(clientId, q);
-  }
-
-  /** Detalle de límite por producto+período */
-  @Get(':clientId/limits/products/:productId')
-  async getOne(
-    @Param('clientId', ParseIntPipe) clientId: number,
-    @Param('productId', ParseIntPipe) productId: number,
-    @Query('period') period: PeriodKind = PeriodKind.Month,
-  ) {
-    return this.svc.getOne(clientId, productId, period);
-  }
-
-  /** Soft delete = desactivar un límite concreto */
-  @Delete(':clientId/limits/products/:productId')
-  async softDelete(
-    @Param('clientId', ParseIntPipe) clientId: number,
-    @Param('productId', ParseIntPipe) productId: number,
-    @Query('period') period: PeriodKind = PeriodKind.Month,
-  ) {
-    return this.svc.deactivateOne(clientId, productId, period);
-  }
-
-  /** Consulta de uso/restante */
-  @Get(':clientId/limits/products/:productId/usage')
-  async usage(
-    @Param('clientId', ParseIntPipe) clientId: number,
-    @Param('productId', ParseIntPipe) productId: number,
-    @Query('period') period: PeriodKind = PeriodKind.Month,
-  ) {
-    return this.svc.getUsage(clientId, productId, period);
+    return this.svc.patchActive(clientId, productId, { ...dto, periodKind });
   }
 }
