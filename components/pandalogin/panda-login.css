@@ -1,0 +1,164 @@
+/* --- GRIFO LOGIN DESIGN COMO SURTIDOR DE GASOLINA --- */
+.grifo {
+  position: relative;
+  width: 220px;
+  margin: 0 auto;
+  height: 350px;
+  margin-top: -170px; /* <--- Más negativo, sube más */
+}
+
+/* Cuerpo principal del surtidor */
+.grifo-cuerpo {
+  position: absolute;
+  top: -20px; /* Subido */
+  left: 40px;
+  width: 140px;
+  height: 200px;
+  background: #e53935;
+  border-radius: 20px 20px 30px 30px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+  border: 4px solid #b71c1c;
+}
+
+/* Pantalla del surtidor */
+.grifo-tubo {
+  position: absolute;
+  top: 0px; /* Subido */
+  left: 70px;
+  width: 60px;
+  height: 40px;
+  background: #fffde7;
+  border-radius: 6px;
+  border: 2px solid #bdbdbd;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.10);
+}
+
+/* Manguera */
+.grifo-mango {
+  position: absolute;
+  top: 40px; /* Subido */
+  left: 170px;
+  width: 18px;
+  height: 120px;
+  background: #263238;
+  border-radius: 12px;
+}
+
+/* Boquilla */
+.grifo-mango::after {
+  content: '';
+  position: absolute;
+  top: 30px; /* Subido */
+  left: 10px;
+  width: 30px;
+  height: 18px;
+  background: #757575;
+  border-radius: 8px 8px 12px 12px;
+  border: 2px solid #424242;
+  transform: rotate(20deg);
+}
+
+/* Logo circular */
+.grifo-salida {
+  position: absolute;
+  top: 40px; /* Subido */
+  left: 90px;
+  width: 40px;
+  height: 40px;
+  background: #fff;
+  border-radius: 50%;
+  border: 2px solid #b71c1c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: #e53935;
+  font-size: 1.2rem;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.10);
+}
+
+/* Gota de gasolina (opcional, puedes usarla como adorno) */
+.gota-agua {
+  position: absolute;
+  top: 90px; /* Subido */
+  left: 180px;
+  width: 14px;
+  height: 24px;
+  background: #ffd600;
+  border-radius: 50% 50% 60% 60% / 60% 60% 100% 100%;
+  box-shadow: 0 2px 8px rgba(255,214,0,0.2);
+  animation: caer-gota 1.5s infinite;
+}
+
+@keyframes caer-gota {
+  0% { opacity: 0; transform: translateY(0);}
+  30% { opacity: 1; }
+  80% { opacity: 1; transform: translateY(20px);}
+  100% { opacity: 0; transform: translateY(40px);}
+}
+
+/* Formulario sobre el grifo */
+form {
+  position: absolute;
+  top: 240px; /* <-- Bajado */
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  border-radius: 12px;
+  padding: 2.5rem 2rem;
+  width: 340px;
+  z-index: 20;
+  box-shadow: 0 10px 15px rgba(0, 0, 0, 0.10);
+  transition: all 0.3s ease-in-out;
+  border: 1px solid #e0e0e0;
+}
+form.up {
+  transform: translate(-50%, -30px);
+}
+
+.form-label {
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  top: 5px;
+  transition: 0.3s;
+  color: #cacaca;
+}
+
+.form-control:focus + .form-label,
+.form-control:valid + .form-label {
+  font-size: 12px;
+  color: #b71c1c;
+  transform: translateY(-15px);
+}
+
+.alert {
+  position: absolute;
+  color: #d32f2f;
+  font-size: 16px;
+  right: -180px;
+  top: -300px;
+  z-index: 200;
+  padding: 30px 25px;
+  background: #fff;
+  box-shadow: 0 3px 5px rgba(0, 0, 0, 0.2);
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(0);
+  transition: 0.4s 0.6s linear;
+}
+
+.wrong-entry .alert {
+  opacity: 1;
+  transform: scale(1);
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0);}
+  20%, 60% { transform: translateX(10px);}
+  40%, 80% { transform: translateX(-10px);}
+}
+
+.wrong-entry {
+  animation: shake 0.3s;
+}

@@ -1,0 +1,60 @@
+[33md506804[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m user and employees complet
+[33m797ff0c[m Merge branch 'main' of https://github.com/yuraqit/grifosis
+[33m98a309b[m usuarios y empleados terminados
+[33m5689268[m Sales solucionado
+[33mdd6b2f1[m users complet
+[33m9b0b537[m intento de arreglo
+[33m158f4e2[m Implement full CRUD for nozzles management
+[33m18cf7a5[m Implement full CRUD for pumps management
+[33mc26ecd9[m Implement full CRUD for tanks management
+[33m3e9e74a[m otros cambios
+[33m7646cc3[m users ya funcional
+[33mb323938[m Implement full CRUD for product management
+[33mfa41648[m cambios con errores talves XD
+[33me835b26[m fix(dto): accept empty birth_date by transforming '' to null
+[33mc4a7c33[m fix(dto): accept null as optional in client fields
+[33m7ef487b[m ...
+[33mce05fe4[m cambios
+[33mac92a8f[m coneccion d clientes de bacekdn y frontend
+[33m2590fcf[m se arreglaron algunos de los erreoes de nozzles y sales para ventas
+[33m0249b62[m nuzzles complet
+[33m984c1e7[m conexion backend and frontend
+[33mce88f79[m Subiendo cambio
+[33m81f01b4[m Subir el back end
+[33mfb6784a[m cambios
+[33m45109ad[m arreglo de usuarios
+[33m34e1e4d[m conect backend and login
+[33mbb68900[m cambio del puerto 3000 al 8000
+[33ma6666ff[m Arreglao
+[33mb2d4732[m postman resuelto
+[33m1f0fc06[m Add .env to gitignore
+[33m8b07c1c[m Add .env to gitignore
+[33md39c2d4[m Se arreglaron los bugs
+[33m5fc04ec[m Se soluciono el error de coexion con la base de datos
+[33md0a4ace[m creacion del entiti eliminado
+[33m6f39fa3[m mejora del backend
+[33m0b699a7[m backend completo
+[33m151cd3a[m Fix template string syntax in credits service
+[33m13b815f[m Remove database.sqlite from tracking and update .gitignore
+[33m03bbdf5[m Fix User entity imports and database.sqlite tracking issues
+[33me62b531[m solucion del excel y el mal tipeo
+[33m3d0743b[m algunos errores solucionados
+[33m27bfb01[m intento de subida n5
+[33m60d8b34[m Forzar subida completa de archivos actualizados
+[33m599a0aa[m errores multiples
+[33m707cd52[m created of contactlog
+[33ma15a2eb[m creacion del super admin y intento de admin
+[33m82d3d21[m complete configuration
+[33m8e44389[m created superadmin
+[33m371bad6[m almost all the requirements were created errors in the shipment
+[33mb184ca3[m cambios en setting
+[33m4041d7d[m  shift ccompleto
+[33m7793bf6[m cambios de discount y shiffts
+[33mbcf7772[m creacion de tablas faltantes
+[33m3dec3b4[m Creating a super admin in the database using Postman
+[33md9be04d[m creating users with roles
+[33m8e7a042[m cambios con el backend
+[33m6526531[m coneccion del backend con el postgress y bbase de datos
+[33m4d1ce1d[m backend upload error fixed
+[33m993365b[m starting the backend
+[33m3093048[m Initial commit

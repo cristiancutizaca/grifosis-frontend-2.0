@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+.carousel {
+  overflow: hidden;
+  width: 90%; /* Cambiar el ancho a 100% para ocupar todo el ancho disponible */
+  margin: auto;
+}
+
+.carousel-inner {
+  display: flex;
+}
+
+.carousel-item {
+  min-width: 100%; /* Cambiar el ancho mínimo al 100% para que cada item ocupe todo el ancho del contenedor */
+  transition: transform 0.5s ease;
+}

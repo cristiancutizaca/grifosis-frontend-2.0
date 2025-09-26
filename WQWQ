@@ -1,0 +1,45 @@
+git add <archivo_resuelto>
+Merge branch 'desarrollo-frontend' of https://github.com/cristiancutizaca/frontend-grifosis into desarrollo-frontend
+# Please enter a commit message to explain why this merge is necessary,
+# especially if it merges an updated upstream into a topic branch.
+#
+# Lines starting with '#' will be ignored, and an empty message aborts
+# the commit.
+#
+# It looks like you may be committing a merge.
+# If this is not correct, please run
+#	git update-ref -d MERGE_HEAD
+# and try again.
+
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# On branch desarrollo-frontend
+# Your branch and 'origin/desarrollo-frontend' have diverged,
+# and have 2 and 4 different commits each, respectively.
+#
+# All conflicts fixed but you are still merging.
+#
+# Changes to be committed:
+#	modified:   app/grifo-inventario/data/initial-dispensadores.ts
+#	modified:   app/grifo-inventario/data/initial-tanks.ts
+#	modified:   app/grifo-inventario/dispensadores-content.tsx
+#	modified:   app/grifo-inventario/hooks/use-dispendador.ts
+#	modified:   app/grifo-inventario/hooks/use-products.ts
+#	modified:   app/grifo-inventario/hooks/use-surtidores.ts
+#	modified:   app/grifo-inventario/hooks/use-tanks.ts
+#	modified:   app/grifo-inventario/surtidores-content.tsx
+#	modified:   app/grifo-inventario/tanks-content.tsx
+#	modified:   app/grifo-inventario/types/dispensadores.d.ts
+#	modified:   app/grifo-inventario/types/surtidores.d.ts
+#	modified:   app/grifo-inventario/types/tanques.d.ts
+#	modified:   app/grifo-ventas/ventas-content.tsx
+#	modified:   src/services/nozzleService.ts
+#	new file:   src/services/pumpService.ts
+#	new file:   src/services/tanksService.ts
+:wq
+:wq
+:wq
+:wq
+#
