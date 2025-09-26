@@ -3,7 +3,7 @@
 
 import api from './apiService';
 
-export type PeriodKind = 'day' | 'week' | 'month'; // (rolling_30d no está en el backend actual)
+export type PeriodKind = 'day' | 'week' | 'month' | 'rolling_30d';
 
 export interface ClientLimitRow {
   id: number;
@@ -11,11 +11,11 @@ export interface ClientLimitRow {
   productId: number;
   productName?: string;
   periodKind: PeriodKind;
-  maxGallons: number;
+  maxGallons: number | null;
   applyToAllPayments: boolean;
   isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface UsageResponse {
@@ -28,7 +28,8 @@ export interface UsageResponse {
   applyToAllPayments: boolean | null;
 }
 
-// ---- helpers ----
+/* -------------------- helpers -------------------- */
+
 function normalizeArray<T = any>(resp: any): T[] {
   if (Array.isArray(resp)) return resp as T[];
   if (Array.isArray(resp?.rows)) return resp.rows as T[];
@@ -37,29 +38,67 @@ function normalizeArray<T = any>(resp: any): T[] {
   return [];
 }
 
-// ======================= API =======================
-
-/** Listar límites de un cliente (siempre retorna array) */
-export async function listClientLimits(
-  clientId: number,
-  opts?: { productId?: number; periodKind?: PeriodKind; onlyActive?: boolean }
-): Promise<ClientLimitRow[]> {
-  const qs = new URLSearchParams();
-  if (opts?.productId) qs.set('productId', String(opts.productId));
-  if (opts?.periodKind) qs.set('periodKind', opts.periodKind);
-  if (typeof opts?.onlyActive === 'boolean') qs.set('onlyActive', String(opts.onlyActive));
-
-  const resp = await api.get<any>(
-    `/clients/${clientId}/limits${qs.toString() ? `?${qs}` : ''}`
-  );
-  // El backend ya responde en camelCase → no hay que mapear keys
-  const rows = normalizeArray<ClientLimitRow>(resp);
-  // Asegurar tipos numéricos
-  return rows.map(r => ({ ...r, maxGallons: Number(r.maxGallons) }));
+function toCamel(row: any): ClientLimitRow {
+  if (!row) {
+    return row;
+  }
+  return {
+    id: Number(row.id ?? row.limit_id ?? 0),
+    clientId: Number(row.client_id ?? row.clientId),
+    productId: Number(row.product_id ?? row.productId),
+    productName: row.product_name ?? row.productName,
+    periodKind: (row.period_kind ?? row.periodKind) as PeriodKind,
+    maxGallons:
+      row.max_gallons !== undefined && row.max_gallons !== null
+        ? Number(row.max_gallons)
+        : row.maxGallons !== undefined && row.maxGallons !== null
+        ? Number(row.maxGallons)
+        : null,
+    applyToAllPayments: Boolean(
+      row.apply_to_all_payments ?? row.applyToAllPayments ?? true
+    ),
+    isActive: Boolean(row.is_active ?? row.isActive ?? true),
+    createdAt: row.created_at ?? row.createdAt,
+    updatedAt: row.updated_at ?? row.updatedAt,
+  };
 }
 
-/** Crear/actualizar límite (camelCase al backend) */
-export function upsertClientLimit(
+function toSnake(payload: Partial<ClientLimitRow>) {
+  return {
+    period_kind: payload.periodKind,
+    max_gallons:
+      payload.maxGallons === null || payload.maxGallons === undefined
+        ? null
+        : Number(payload.maxGallons),
+    apply_to_all_payments:
+      payload.applyToAllPayments === undefined
+        ? true
+        : Boolean(payload.applyToAllPayments),
+    is_active:
+      payload.isActive === undefined ? true : Boolean(payload.isActive),
+  };
+}
+
+/* -------------------- API -------------------- */
+
+/** Listar límites de un cliente (siempre retorna array de camelCase) */
+export async function listClientLimits(
+  clientId: number,
+  opts?: { period?: PeriodKind; active?: boolean }
+): Promise<ClientLimitRow[]> {
+  const qs = new URLSearchParams();
+  if (opts?.period) qs.set('period', opts.period);
+  if (typeof opts?.active === 'boolean') qs.set('active', String(opts.active));
+  const url = `/clients/${clientId}/limits/products${
+    qs.toString() ? `?${qs}` : ''
+  }`;
+
+  const resp = await api.get<any>(url);
+  return normalizeArray<any>(resp).map(toCamel);
+}
+
+/** Crear/actualizar límite para un producto */
+export async function upsertClientLimit(
   clientId: number,
   productId: number,
   body: {
@@ -68,70 +107,87 @@ export function upsertClientLimit(
     applyToAllPayments?: boolean;
     isActive?: boolean;
   }
-) {
-  return api.put<ClientLimitRow>(
+): Promise<ClientLimitRow> {
+  const payload = toSnake(body);
+  const resp = await api.put<any>(
     `/clients/${clientId}/limits/products/${productId}`,
-    {
-      periodKind: body.periodKind,
-      maxGallons: Number(body.maxGallons),
-      applyToAllPayments: body.applyToAllPayments ?? true,
-      isActive: body.isActive ?? true,
-    }
+    payload
   );
+  return toCamel(resp);
 }
 
-/** Activar/desactivar (opcional pasar period para afectar solo ese período) */
-export function setClientLimitActive(
+/** Activar/desactivar límite; si pasas period, afecta solo ese período */
+export async function setClientLimitActive(
   clientId: number,
   productId: number,
   isActive: boolean,
   period?: PeriodKind
-) {
+): Promise<{ updated: number } | any> {
   const qs = period ? `?period=${period}` : '';
-  return api.patch<ClientLimitRow[]>(
+  // el backend acepta body plano { isActive } o { is_active }
+  const resp = await api.patch<any>(
     `/clients/${clientId}/limits/products/${productId}/active${qs}`,
     { isActive }
   );
+  return resp;
 }
 
-/**
- * “Eliminar” → no tenemos DELETE en backend.
- * Implementamos como desactivar el período indicado.
- */
+/** Eliminar/desactivar un límite específico (por período) */
 export async function deleteClientLimit(
   clientId: number,
   productId: number,
   period: PeriodKind
-) {
-  await setClientLimitActive(clientId, productId, false, period);
-  return { deactivated: true };
+): Promise<{ deactivated: boolean } | any> {
+  const resp = await api.delete<any>(
+    `/clients/${clientId}/limits/products/${productId}?period=${period}`
+  );
+  return resp;
 }
 
-/**
- * Detalle único: no hay endpoint dedicado en backend actual.
- * Si necesitas uno, usamos list con filtros y tomamos el primero.
- */
+/** Obtener un límite puntual (útil si necesitas cargar uno antes de editar) */
 export async function getClientLimit(
   clientId: number,
   productId: number,
   period: PeriodKind
-) {
-  const rows = await listClientLimits(clientId, { productId, periodKind: period });
-  return rows[0];
+): Promise<ClientLimitRow | null> {
+  const resp = await api.get<any>(
+    `/clients/${clientId}/limits/products/${productId}?period=${period}`
+  );
+  if (!resp) return null;
+  // algunos backends envían {row: ...} o {...directo}
+  const row = resp.row ?? resp;
+  return toCamel(row);
 }
 
-/**
- * Uso del período: si aún no tienes endpoint en backend,
- * esta función fallará y el UI mostrará “err”.
- * Si luego agregas /usage, quedará plug-and-play.
- */
-export function getClientLimitUsage(
+/** Uso del período (consumido vs. máximo) */
+export async function getClientLimitUsage(
   clientId: number,
   productId: number,
   period: PeriodKind
-) {
-  // Ajusta esta ruta cuando implementes el endpoint real en backend
-  return api.get<UsageResponse>(
+): Promise<UsageResponse> {
+  const resp = await api.get<any>(
     `/clients/${clientId}/limits/products/${productId}/usage?period=${period}`
   );
+
+  // Mapear a camel y asegurar tipos numéricos
+  return {
+    clientId: Number(resp.client_id ?? resp.clientId ?? clientId),
+    productId: Number(resp.product_id ?? resp.productId ?? productId),
+    periodKind: (resp.period_kind ?? resp.periodKind ?? period) as PeriodKind,
+    maxGallons:
+      resp.max_gallons !== undefined && resp.max_gallons !== null
+        ? Number(resp.max_gallons)
+        : resp.maxGallons !== undefined && resp.maxGallons !== null
+        ? Number(resp.maxGallons)
+        : null,
+    usedGallons: Number(resp.used_gallons ?? resp.usedGallons ?? 0),
+    remainingGallons:
+      resp.remaining_gallons !== undefined && resp.remaining_gallons !== null
+        ? Number(resp.remaining_gallons)
+        : resp.remainingGallons !== undefined &&
+          resp.remainingGallons !== null
+        ? Number(resp.remainingGallons)
+        : null,
+    applyToAllPayments: resp.apply_to_all_payments ?? resp.applyToAllPayments ?? null,
+  };
 }

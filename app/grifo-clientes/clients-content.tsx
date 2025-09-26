@@ -1,3 +1,4 @@
+// app/grifo-clientes/ClientsContent.tsx
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -39,8 +40,10 @@ const hasClientPermission = (
 const getTipoCliente = (client: Client) => {
   const raw =
     (client as any).client_type ??
-    client.client_type ??
-    (client as any).tipo_cliente;
+    (client as any).tipo_cliente ??
+    (client as any).type ??
+    (client as any).clientType ??
+    client.client_type;
   return raw === 'empresa' ? 'empresa' : 'persona';
 };
 
@@ -76,8 +79,8 @@ const ClientsContent: React.FC = () => {
           clientService.getAllClients(),
           productService.getProducts(),
         ]);
-        setClients(data);
-        setProducts(prods ?? []);
+        setClients(Array.isArray(data) ? data : []);
+        setProducts(Array.isArray(prods) ? prods : []);
       } catch {
         alert('Error cargando clientes o productos');
       } finally {
@@ -120,11 +123,11 @@ const ClientsContent: React.FC = () => {
 
       const updated = await clientService.updateClient({
         ...dataToSend,
-        client_id: updatedClient.client_id,
+        client_id: (updatedClient as any).client_id,
       });
 
       setClients((prev) =>
-        prev.map((c) => (c.client_id === updated.client_id ? updated : c))
+        prev.map((c) => ((c as any).client_id === (updated as any).client_id ? (updated as Client) : c))
       );
       setEditingClient(null);
     } catch {
@@ -141,7 +144,7 @@ const ClientsContent: React.FC = () => {
     if (!window.confirm('¿Seguro que deseas eliminar este cliente?')) return;
     try {
       await clientService.deleteClient(clientId);
-      setClients((prev) => prev.filter((c) => c.client_id !== clientId));
+      setClients((prev) => prev.filter((c) => (c as any).client_id !== clientId));
     } catch {
       alert('Error eliminando cliente');
     }
@@ -151,12 +154,12 @@ const ClientsContent: React.FC = () => {
   const filteredClients = useMemo(() => {
     const st = searchTerm.trim().toLowerCase();
     return clients.filter((client) => {
-      const fullName = `${client.first_name ?? (client as any).nombre ?? ''} ${
-        client.last_name ?? (client as any).apellido ?? ''
-      }`.toLowerCase();
-      const document = (client.document_number ?? (client as any).documento ?? '').toLowerCase();
+      const firstName = (client as any).first_name ?? (client as any).nombre ?? '';
+      const lastName = (client as any).last_name ?? (client as any).apellido ?? '';
+      const fullName = `${firstName} ${lastName}`.trim().toLowerCase();
+      const document = ((client as any).document_number ?? (client as any).documento ?? '').toLowerCase();
       const matchesSearch = !st || fullName.includes(st) || document.includes(st);
-      const matchesCategory = selectedFilter === '' || client.category === selectedFilter;
+      const matchesCategory = selectedFilter === '' || (client as any).category === selectedFilter;
       const matchesClientType = selectedClientType === '' || getTipoCliente(client) === selectedClientType;
       return matchesSearch && matchesCategory && matchesClientType;
     });
@@ -354,20 +357,20 @@ const ClientsContent: React.FC = () => {
                     const tipo = getTipoCliente(client);
                     const nombre =
                       tipo === 'persona'
-                        ? `${client.first_name ?? (client as any).nombre ?? ''} ${
-                            client.last_name ?? (client as any).apellido ?? ''
+                        ? `${(client as any).first_name ?? (client as any).nombre ?? ''} ${
+                            (client as any).last_name ?? (client as any).apellido ?? ''
                           }`.trim()
-                        : client.company_name || (client as any).nombre || '';
+                        : (client as any).company_name || (client as any).nombre || '';
                     return (
                       <tr
-                        key={client.client_id}
+                        key={(client as any).client_id}
                         className="border-b border-slate-700/50 hover:bg-slate-700/30"
                       >
                         <td className="sticky left-0 bg-slate-800/80 backdrop-blur px-4 py-3 text-white z-10">
                           {nombre}
                         </td>
                         <td className="py-3 px-4 text-slate-300">
-                          {client.document_number ?? (client as any).documento ?? ''}
+                          {(client as any).document_number ?? (client as any).documento ?? ''}
                         </td>
                         <td className="py-3 px-4">
                           <span
@@ -380,15 +383,15 @@ const ClientsContent: React.FC = () => {
                             {tipo === 'persona' ? 'Natural' : 'Empresa'}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-slate-300">{client.category || '---'}</td>
+                        <td className="py-3 px-4 text-slate-300">{(client as any).category || '---'}</td>
                         <td className="py-3 px-4 text-slate-300">
-                          {client.phone ?? (client as any).telefono ?? ''}
+                          {(client as any).phone ?? (client as any).telefono ?? ''}
                         </td>
-                        <td className="py-3 px-4 text-slate-300">{client.email ?? ''}</td>
+                        <td className="py-3 px-4 text-slate-300">{(client as any).email ?? ''}</td>
 
                         {/* Límite Crédito: cantidad de límites activos */}
                         <td className="py-3 px-4">
-                          <ActiveLimitsCell clientId={client.client_id} />
+                          <ActiveLimitsCell clientId={(client as any).client_id} />
                         </td>
 
                         <td className="sticky right-0 bg-slate-800/80 backdrop-blur px-4 py-2 z-10">
@@ -407,7 +410,7 @@ const ClientsContent: React.FC = () => {
 
                             {/* Eliminar */}
                             <button
-                              onClick={() => canDelete && handleDeleteClient(client.client_id)}
+                              onClick={() => canDelete && handleDeleteClient((client as any).client_id)}
                               disabled={!canDelete}
                               className={`text-red-500 flex items-center ${
                                 canDelete ? 'hover:text-red-600' : 'opacity-50 cursor-not-allowed'
@@ -421,7 +424,7 @@ const ClientsContent: React.FC = () => {
                             <button
                               onClick={() => {
                                 if (!canEdit) return;
-                                setLimitsClientId(client.client_id);
+                                setLimitsClientId((client as any).client_id);
                                 setLimitsClientName(nombre);
                               }}
                               disabled={!canEdit}
@@ -475,19 +478,11 @@ function ActiveLimitsCell({ clientId }: { clientId: number }) {
     let mounted = true;
     (async () => {
       try {
-        const rows = await listClientLimits(clientId, { onlyActive: true });
+        // Usa el flag correcto del service: { active: true }
+        const rows = await listClientLimits(clientId, { active: true });
         if (!mounted) return;
-
-        // --- Opción 1 (actual): contar límites activos
         const count = Array.isArray(rows) ? rows.length : 0;
         setText(count === 0 ? '0' : `${count} activo${count > 1 ? 's' : ''}`);
-
-        // --- Opción 2: sumar galones
-        // const total = (Array.isArray(rows) ? rows : []).reduce(
-        //   (acc: number, r: any) => acc + Number(r.maxGallons || 0),
-        //   0
-        // );
-        // setText(`${total.toFixed(3)} gal`);
       } catch {
         if (!mounted) return;
         setText('err');
