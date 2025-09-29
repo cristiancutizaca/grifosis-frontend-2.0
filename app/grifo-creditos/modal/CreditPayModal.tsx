@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { X, DollarSign, CreditCard as CardIcon } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { X, DollarSign, CreditCard as CardIcon, Wand2 } from 'lucide-react';
 import ClientService, { Client } from '../../../src/services/clientService';
 import creditService, { Credit } from '../../../src/services/creditService';
 import paymentMethodService from '../../../src/services/paymentMethodService';
@@ -21,7 +21,7 @@ type UIPaymentMethod = {
   is_active?: boolean;
 };
 
-// ✅ número robusto (evita NaN con strings, S/ , comas, etc.)
+// número robusto
 const num = (v: any): number => {
   if (v === null || v === undefined) return 0;
   if (typeof v === 'number') return isFinite(v) ? v : 0;
@@ -29,6 +29,11 @@ const num = (v: any): number => {
   const n = parseFloat(cleaned);
   return Number.isNaN(n) ? 0 : n;
 };
+
+function mergeCreditsById<T extends { credit_id: number }>(prev: T[], updated: T[]) {
+  const map = new Map(updated.map(c => [c.credit_id, c]));
+  return prev.map(c => (map.get(c.credit_id) ? { ...c, ...map.get(c.credit_id)! } : c));
+}
 
 export default function CreditPayModal({ open, onClose, defaultClientId = null, onPaid }: Props) {
   const [loading, setLoading] = useState(true);
@@ -45,7 +50,31 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<number | null>(null);
   const [reference, setReference] = useState<string>('');
 
+  // modo automático y monto
+  const [autoMode, setAutoMode] = useState<boolean>(true);
+  const [autoAmount, setAutoAmount] = useState<string>('');
+
   const isClientLocked = !!defaultClientId;
+
+  // refs para cerrar por click afuera
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // cerrar con ESC
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  // cerrar con click en backdrop
+  const handleOverlayMouseDown = (e: React.MouseEvent) => {
+    if (!overlayRef.current || !panelRef.current) return;
+    if (e.target === overlayRef.current) onClose();
+  };
 
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(v ?? 0);
@@ -53,8 +82,11 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
   const clientNameById = useMemo(() => {
     const dict: Record<number, string> = {};
     clientes.forEach((c) => {
-      if ((c as any).client_type === 'empresa' && (c as any).company_name) dict[c.client_id] = (c as any).company_name as string;
-      else dict[c.client_id] = `${(c as any).first_name ?? c.nombre ?? ''} ${(c as any).last_name ?? c.apellido ?? ''}`.trim();
+      if ((c as any).client_type === 'empresa' && (c as any).company_name) {
+        dict[c.client_id] = (c as any).company_name as string;
+      } else {
+        dict[c.client_id] = `${(c as any).first_name ?? (c as any).nombre ?? ''} ${(c as any).last_name ?? (c as any).apellido ?? ''}`.trim();
+      }
     });
     return dict;
   }, [clientes]);
@@ -63,7 +95,8 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
     const pending = credits.filter((c) => c.status === 'pending' || c.status === 'overdue');
     const map = new Map<number, { client_id: number; name: string; debt: number }>();
     pending.forEach((c) => {
-      const debt = num(c.credit_amount) - num(c.amount_paid);
+      const debt = Math.max(0, num(c.credit_amount) - num(c.amount_paid));
+      if (debt <= 0) return;
       const prev = map.get(c.client_id);
       if (prev) prev.debt += debt;
       else {
@@ -93,12 +126,23 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
     [credits, selectedClientId]
   );
 
-  // ====== Multi-selección ======
+  const totalDebtSelectedClient = useMemo(
+    () =>
+      selectedClientPendingCredits.reduce(
+        (s, c) => s + Math.max(0, num(c.credit_amount) - num(c.amount_paid)),
+        0
+      ),
+    [selectedClientPendingCredits]
+  );
+
+  // ====== Multi-selección (manual) ======
   const [selectedMap, setSelectedMap] = useState<Record<number, boolean>>({});
   const [rowAmounts, setRowAmounts] = useState<Record<number, string>>({});
   const [selectAll, setSelectAll] = useState(false);
 
+  // reset de filas cuando cambia cliente/lista o se abre
   useEffect(() => {
+    if (!open) return;
     const nextAmts: Record<number, string> = {};
     selectedClientPendingCredits.forEach((cr) => {
       const saldo = Math.max(0, num(cr.credit_amount) - num(cr.amount_paid));
@@ -107,7 +151,15 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
     setRowAmounts(nextAmts);
     setSelectedMap({});
     setSelectAll(false);
-  }, [selectedClientPendingCredits]);
+  }, [open, selectedClientPendingCredits]);
+
+  // ✅ reset del monto y del modo cada vez que se abre el modal
+  useEffect(() => {
+    if (!open) return;
+    setAutoAmount('');     // deja el input vacío
+    setAutoMode(true);     // opcional: siempre abre en modo automático
+    setError(null);        // limpia errores antiguos
+  }, [open]);
 
   const toggleOne = (id: number) => {
     setSelectedMap((prev) => {
@@ -138,7 +190,7 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
       .map((cr) => {
         const saldo = Math.max(0, num(cr.credit_amount) - num(cr.amount_paid));
         const raw = parseFloat(rowAmounts[cr.credit_id] ?? '0') || 0;
-        const amount = Math.min(raw, saldo); // nunca más del saldo
+        const amount = Math.min(raw, saldo);
         return { credit: cr, amount };
       })
       .filter((it) => it.amount > 0);
@@ -183,10 +235,11 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
   // ===== Submit =====
   const canSubmit = useMemo(() => {
     if (!selectedClientId || !selectedPaymentMethodId) return false;
+    if (autoMode) return num(autoAmount) > 0;
     if (selectedItems.length === 0) return false;
     if (totalSeleccionado <= 0) return false;
     return true;
-  }, [selectedClientId, selectedPaymentMethodId, selectedItems, totalSeleccionado]);
+  }, [selectedClientId, selectedPaymentMethodId, autoMode, autoAmount, selectedItems, totalSeleccionado]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,7 +254,33 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
     setProcessing(true);
     setError(null);
     try {
-      // ✅ PAGO EN LOTE — el backend espera `items`
+      if (autoMode) {
+        // Pago automático por monto
+        const resp = await creditService.autoAllocatePayment(Number(selectedClientId), {
+          amount: Number(num(autoAmount).toFixed(2)),
+          payment_method_id: Number(selectedPaymentMethodId),
+          user_id: Number(userId),
+          notes: reference?.trim() || undefined,
+          order: 'due',
+        });
+
+        if (Array.isArray(resp?.updatedCredits) && resp.updatedCredits.length) {
+          setCredits((prev) => mergeCreditsById(prev, resp.updatedCredits));
+        }
+
+        alert(
+          resp?.leftover > 0
+            ? `Pago aplicado. Sobró ${formatCurrency(resp.leftover)} (no había más deuda).`
+            : 'Pago aplicado correctamente.'
+        );
+
+        setAutoAmount(''); // limpia antes de cerrar (por si reabre rápido)
+        await onPaid?.();
+        onClose(); // cierre automático
+        return;
+      }
+
+      // Pago manual en lote
       const payload = {
         payment_method_id: selectedPaymentMethodId!,
         user_id: Number(userId),
@@ -214,14 +293,9 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
 
       const resp: any = await createPaymentsBulk(payload as any);
 
-      // Si backend devuelve créditos actualizados, usamos esos
-      const updatedCredits: Credit[] | undefined =
-        resp?.updated || resp?.updatedCredits || undefined;
-
+      const updatedCredits: Credit[] | undefined = resp?.updated || resp?.updatedCredits || undefined;
       if (Array.isArray(updatedCredits) && updatedCredits.length) {
-        const map = new Map<number, Credit>();
-        updatedCredits.forEach((c) => map.set(c.credit_id, c));
-        setCredits((prev) => prev.map((c) => (map.has(c.credit_id) ? map.get(c.credit_id)! : c)));
+        setCredits((prev) => mergeCreditsById(prev, updatedCredits));
       } else {
         // Optimista
         const paidById = new Map<number, number>();
@@ -247,16 +321,16 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
         );
       }
 
-      await onPaid?.();
       alert('Pagos registrados exitosamente');
-      onClose();
+      setAutoAmount(''); // limpia antes de cerrar
+      await onPaid?.();
+      onClose(); // cierre automático
     } catch (e: any) {
       console.error(e);
-      // Muestra mensaje exacto del backend si viene (por ejemplo: "supera el saldo...")
       const msg =
         e?.response?.data?.message ||
         e?.message ||
-        'Error al registrar los pagos. Revisa y vuelve a intentar.';
+        'Error al registrar el pago. Revisa y vuelve a intentar.';
       setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
     } finally {
       setProcessing(false);
@@ -266,90 +340,165 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-xl rounded-2xl bg-slate-900 border border-slate-700 shadow-xl">
+    <div
+      ref={overlayRef}
+      onMouseDown={handleOverlayMouseDown}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 sm:p-6"
+    >
+      <div
+        ref={panelRef}
+        className="w-full max-w-full sm:max-w-xl md:max-w-2xl rounded-2xl bg-slate-900 border border-slate-700 shadow-xl"
+        role="dialog"
+        aria-modal="true"
+      >
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
           <h2 className="text-white font-semibold">Pagar créditos</h2>
-          <button onClick={onClose} className="p-2 hover:opacity-80" aria-label="Cerrar">
-            <X className="h-5 w-5 text-slate-300" />
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg hover:bg-slate-800/70 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+            aria-label="Cerrar"
+          >
+            <X className="h-5 w-5 text-slate-200" />
           </button>
         </div>
 
-        <div className="px-4 py-4">
+        <div className="px-4 py-4 max-h-[80vh] overflow-y-auto">
           {loading ? (
             <p className="text-slate-300 text-sm">Cargando...</p>
           ) : (
             <form onSubmit={submit} className="space-y-4">
               {/* Cliente */}
               <label className="block text-sm">
-                <span className="block mb-1 text-slate-300">Cliente</span>
+                <span className="block mb-1 text-slate-200">Cliente</span>
                 <select
                   value={selectedClientId}
                   onChange={(e) => setSelectedClientId(e.target.value)}
                   disabled={isClientLocked}
-                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500 disabled:opacity-70 disabled:cursor-not-allowed"
+                  style={{ colorScheme: 'dark' }}
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500 disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                  {!isClientLocked && <option value="">Seleccionar cliente</option>}
+                  {!isClientLocked && <option className="bg-slate-800 text-white" value="">Seleccionar cliente</option>}
                   {clientOptions.map((c) => (
-                    <option key={c.client_id} value={c.client_id}>
+                    <option className="bg-slate-800 text-white" key={c.client_id} value={c.client_id}>
                       {(clientNameById[c.client_id] || c.name) + ' - ' + formatCurrency(c.debt)}
                     </option>
                   ))}
                 </select>
               </label>
 
+              {/* Toggle de modo automático */}
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2">
+                <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="accent-emerald-500"
+                    checked={autoMode}
+                    onChange={() => setAutoMode((v) => !v)}
+                  />
+                  <span className="flex items-center gap-2">
+                    <Wand2 className="h-4 w-4 text-emerald-400" />
+                    Pago automático por monto (vencimiento → antiguo)
+                  </span>
+                </label>
+
+                {autoMode && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-300">Monto total</span>
+                    <div className="flex items-center rounded-md border border-slate-600 bg-slate-800 px-2">
+                      <DollarSign className="h-4 w-4 text-slate-400 mr-1" />
+                      <input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        inputMode="decimal"
+                        value={autoAmount}
+                        onChange={(e) => setAutoAmount(e.target.value)}
+                        placeholder="Ej. 500.00"
+                        className="w-32 bg-transparent py-1 text-right text-white outline-none placeholder-slate-400"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Créditos del cliente */}
               {selectedClientId && selectedClientPendingCredits.length > 0 ? (
-                <div className="text-sm space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-300">Créditos</span>
-                    <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
-                      <input type="checkbox" checked={selectAll} onChange={toggleAll} className="accent-green-500" />
-                      Seleccionar todo
-                    </label>
-                  </div>
-
-                  <div className="max-h-56 overflow-auto rounded-lg border border-slate-700">
-                    {selectedClientPendingCredits.map((cr) => {
-                      const saldo = Math.max(0, num(cr.credit_amount) - num(cr.amount_paid));
-                      const overdue = !!cr.due_date && new Date(cr.due_date) < new Date() && saldo > 0;
-
-                      return (
-                        <label key={cr.credit_id} className="flex items-center gap-3 px-3 py-2 border-b border-slate-800 last:border-0">
-                          <input
-                            type="checkbox"
-                            className="accent-green-500"
-                            checked={!!selectedMap[cr.credit_id]}
-                            onChange={() => toggleOne(cr.credit_id)}
-                          />
-                          <div className="flex-1 text-slate-200">
-                            <div className="font-medium">
-                              #{cr.credit_id}{' '}
-                              {overdue && <span className="ml-2 text-xs px-2 py-0.5 rounded-full border border-red-500 text-red-400">Vencido</span>}
-                            </div>
-                            <div className="text-xs text-slate-400">
-                              saldo {formatCurrency(saldo)}
-                              {cr.due_date ? ` • vence ${new Date(cr.due_date).toLocaleDateString('es-PE')}` : ''}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center rounded-md border border-slate-600 bg-slate-800 px-2">
-                            <DollarSign className="h-3 w-3 text-slate-400 mr-1" />
-                            <input
-                              type="number"
-                              step="0.01"
-                              min={0}
-                              max={saldo}
-                              value={rowAmounts[cr.credit_id] ?? saldo.toFixed(2)}
-                              onChange={(e) => setRowAmounts((prev) => ({ ...prev, [cr.credit_id]: e.target.value }))}
-                              className="w-28 bg-transparent py-1 text-right text-white outline-none placeholder-slate-400"
-                            />
-                          </div>
+                <>
+                  {autoMode ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="rounded-lg border border-slate-700 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-slate-400">Deuda del cliente</div>
+                        <div className="text-base font-semibold text-white">{formatCurrency(totalDebtSelectedClient)}</div>
+                        <div className="text-xs text-slate-400 mt-1">
+                          Se aplicará {formatCurrency(num(autoAmount))} del más urgente al menos urgente.
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-slate-700 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-slate-400">Créditos con saldo</div>
+                        <div className="text-base font-semibold text-white">{selectedClientPendingCredits.length}</div>
+                        <div className="text-xs text-slate-400 mt-1">Orden: vencimiento (NULLs al final) → creado.</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-200">Créditos</span>
+                        <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                          <input type="checkbox" checked={selectAll} onChange={toggleAll} className="accent-emerald-500" />
+                          Seleccionar todo
                         </label>
-                      );
-                    })}
-                  </div>
-                </div>
+                      </div>
+
+                      <div className="max-h-56 overflow-auto rounded-lg border border-slate-700">
+                        {selectedClientPendingCredits.map((cr) => {
+                          const saldo = Math.max(0, num(cr.credit_amount) - num(cr.amount_paid));
+                          const overdue = !!cr.due_date && new Date(cr.due_date) < new Date() && saldo > 0;
+
+                          return (
+                            <label
+                              key={cr.credit_id}
+                              className="flex items-center gap-3 px-3 py-2 border-b border-slate-800 last:border-0 bg-slate-900/40"
+                            >
+                              <input
+                                type="checkbox"
+                                className="accent-emerald-500"
+                                checked={!!selectedMap[cr.credit_id]}
+                                onChange={() => toggleOne(cr.credit_id)}
+                              />
+                              <div className="flex-1 text-slate-200">
+                                <div className="font-medium">
+                                  #{cr.credit_id}{' '}
+                                  {overdue && (
+                                    <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full border border-red-500 text-red-400">
+                                      Vencido
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                  saldo {formatCurrency(saldo)}
+                                  {cr.due_date ? ` • vence ${new Date(cr.due_date).toLocaleDateString('es-PE')}` : ''}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center rounded-md border border-slate-600 bg-slate-800 px-2">
+                                <DollarSign className="h-3 w-3 text-slate-400 mr-1" />
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min={0}
+                                  max={saldo}
+                                  value={rowAmounts[cr.credit_id] ?? saldo.toFixed(2)}
+                                  onChange={(e) => setRowAmounts((prev) => ({ ...prev, [cr.credit_id]: e.target.value }))}
+                                  className="w-28 bg-transparent py-1 text-right text-white outline-none placeholder-slate-400"
+                                />
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : selectedClientId ? (
                 <div className="text-xs text-slate-400">Este cliente no tiene créditos pendientes/vencidos.</div>
               ) : null}
@@ -357,20 +506,25 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
               {/* Resumen total + método */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="rounded-lg border border-slate-700 p-3">
-                  <div className="text-[11px] uppercase tracking-wide text-slate-400">Total seleccionado</div>
-                  <div className="text-base font-semibold text-white">{formatCurrency(totalSeleccionado)}</div>
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400">
+                    {autoMode ? 'Monto a aplicar' : 'Total seleccionado'}
+                  </div>
+                  <div className="text-base font-semibold text-white">
+                    {formatCurrency(autoMode ? num(autoAmount) : totalSeleccionado)}
+                  </div>
                 </div>
 
                 <label className="text-sm block">
-                  <span className="block mb-1 text-slate-300">Método de pago</span>
+                  <span className="block mb-1 text-slate-200">Método de pago</span>
                   <div className="flex items-center rounded-lg border border-slate-600 bg-slate-800">
                     <select
-                      className="w-full bg-transparent py-2 px-3 text-white outline-none"
+                      style={{ colorScheme: 'dark' }} // menú desplegable oscuro
+                      className="w-full bg-transparent py-2 px-3 text-white outline-none focus:border-emerald-500"
                       value={selectedPaymentMethodId ?? ''}
                       onChange={(e) => setSelectedPaymentMethodId(Number(e.target.value))}
                     >
                       {paymentMethods.map((m) => (
-                        <option key={m.payment_method_id} value={m.payment_method_id}>
+                        <option className="bg-slate-800 text-white" key={m.payment_method_id} value={m.payment_method_id}>
                           {m.name ?? `Método ${m.payment_method_id}`}
                         </option>
                       ))}
@@ -384,26 +538,34 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
 
               {/* Referencia */}
               <label className="text-sm block">
-                <span className="block mb-1 text-slate-300">Referencia (opcional)</span>
+                <span className="block mb-1 text-slate-200">Referencia (opcional)</span>
                 <input
                   type="text"
                   value={reference}
                   onChange={(e) => setReference(e.target.value)}
                   placeholder="Ej. voucher, nota, etc."
-                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:border-green-500"
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
                 />
               </label>
 
-              {error && <p className="text-sm text-red-400">{error}</p>}
+              {error && (
+                <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">
+                  {error}
+                </p>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-1">
-                <button type="button" onClick={onClose} className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800/70 focus:outline-none focus:ring-2 focus:ring-slate-500/50"
+                >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={!canSubmit || processing}
-                  className="rounded-lg bg-green-500 hover:bg-green-600 text-white px-4 py-2 text-sm disabled:opacity-50"
+                  className="rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 text-sm disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-emerald-400/70"
                 >
                   {processing ? 'Procesando...' : 'Pagar'}
                 </button>

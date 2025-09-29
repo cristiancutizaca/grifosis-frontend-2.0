@@ -8,11 +8,14 @@ import {
   Gauge as LimitsIcon,
   ChevronLeft,
   ChevronRight,
+  Users, // 👈 NUEVO icono
 } from 'lucide-react';
+import { createPortal } from 'react-dom'; // 👈 portal
 
 import CreateClientModal, { CATEGORIES } from './components/CreateClientModal';
 import EditClientModal from './components/EditClientModal';
 import ClientLimitsModal from './components/ClientLimitsModal';
+import CompanyDriversModal from './components/CompanyDriversModal'; // 👈 modal global
 
 import clientService, { Client } from '../../src/services/clientService';
 import productService, { Product } from '../../src/services/productService';
@@ -61,6 +64,13 @@ const ClientsContent: React.FC = () => {
   // modal límites
   const [limitsClientId, setLimitsClientId] = useState<number | null>(null);
   const [limitsClientName, setLimitsClientName] = useState<string | undefined>();
+
+  // 👇 NUEVO — modal global de conductores
+  const [driversOpen, setDriversOpen] = useState(false);
+  const [driversCompanyId, setDriversCompanyId] = useState<number | null>(null);
+  const [driversCompanyName, setDriversCompanyName] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false); // para portal
+  useEffect(() => setMounted(true), []);
 
   // contenedor scrollable de la tabla
   const tableWrapRef = useRef<HTMLDivElement>(null);
@@ -162,7 +172,7 @@ const ClientsContent: React.FC = () => {
     });
   }, [clients, searchTerm, selectedFilter, selectedClientType]);
 
-  // navegación horizontal: clic, mantener, doble clic
+  // navegación horizontal
   const scrollByChunk = (dir: 'left' | 'right') => {
     const el = tableWrapRef.current;
     if (!el) return;
@@ -206,7 +216,7 @@ const ClientsContent: React.FC = () => {
     return () => el.removeEventListener('wheel', onWheel as any);
   }, []);
 
-  // atajos de teclado (opcional)
+  // atajos de teclado
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -227,6 +237,13 @@ const ClientsContent: React.FC = () => {
   const canCreate = hasClientPermission('create', currentUserRole);
   const canEdit = hasClientPermission('edit', currentUserRole);
   const canDelete = hasClientPermission('delete', currentUserRole);
+
+  // 👇 helper para abrir el modal de conductores
+  const openDrivers = (companyId: number, companyName: string) => {
+    setDriversCompanyId(companyId);
+    setDriversCompanyName(companyName);
+    setDriversOpen(true);
+  };
 
   return (
     <div className="p-3 sm:p-4 lg:p-6 lg:space-y-6">
@@ -392,27 +409,39 @@ const ClientsContent: React.FC = () => {
                         </td>
 
                         <td className="sticky right-0 bg-slate-800/80 backdrop-blur px-4 py-2 z-10">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-2 flex-wrap">
                             {/* Editar */}
                             <button
-                              onClick={() => canEdit && setEditingClient(client)}
-                              disabled={!canEdit}
+                              onClick={() => hasClientPermission('edit', currentUserRole) && setEditingClient(client)}
+                              disabled={!hasClientPermission('edit', currentUserRole)}
                               className={`text-blue-500 flex items-center ${
-                                canEdit ? 'hover:text-blue-600' : 'opacity-50 cursor-not-allowed'
+                                hasClientPermission('edit', currentUserRole)
+                                  ? 'hover:text-blue-600'
+                                  : 'opacity-50 cursor-not-allowed'
                               }`}
-                              title={canEdit ? 'Editar cliente' : 'No tiene permisos para editar'}
+                              title={
+                                hasClientPermission('edit', currentUserRole)
+                                  ? 'Editar cliente'
+                                  : 'No tiene permisos para editar'
+                              }
                             >
                               <EditIcon />
                             </button>
 
                             {/* Eliminar */}
                             <button
-                              onClick={() => canDelete && handleDeleteClient(client.client_id)}
-                              disabled={!canDelete}
+                              onClick={() => hasClientPermission('delete', currentUserRole) && handleDeleteClient(client.client_id)}
+                              disabled={!hasClientPermission('delete', currentUserRole)}
                               className={`text-red-500 flex items-center ${
-                                canDelete ? 'hover:text-red-600' : 'opacity-50 cursor-not-allowed'
+                                hasClientPermission('delete', currentUserRole)
+                                  ? 'hover:text-red-600'
+                                  : 'opacity-50 cursor-not-allowed'
                               }`}
-                              title={canDelete ? 'Eliminar cliente' : 'No tiene permisos para eliminar'}
+                              title={
+                                hasClientPermission('delete', currentUserRole)
+                                  ? 'Eliminar cliente'
+                                  : 'No tiene permisos para eliminar'
+                              }
                             >
                               <DeleteIcon />
                             </button>
@@ -420,22 +449,37 @@ const ClientsContent: React.FC = () => {
                             {/* Límites por producto */}
                             <button
                               onClick={() => {
-                                if (!canEdit) return;
+                                if (!hasClientPermission('edit', currentUserRole)) return;
                                 setLimitsClientId(client.client_id);
                                 setLimitsClientName(nombre);
                               }}
-                              disabled={!canEdit}
+                              disabled={!hasClientPermission('edit', currentUserRole)}
                               className={`text-emerald-400 flex items-center ${
-                                canEdit ? 'hover:text-emerald-500' : 'opacity-50 cursor-not-allowed'
+                                hasClientPermission('edit', currentUserRole)
+                                  ? 'hover:text-emerald-500'
+                                  : 'opacity-50 cursor-not-allowed'
                               }`}
                               title={
-                                canEdit
+                                hasClientPermission('edit', currentUserRole)
                                   ? 'Configurar límites por producto'
                                   : 'No tiene permisos para configurar límites'
                               }
                             >
                               <LimitsIcon />
                             </button>
+
+                            {/* Conductores (solo empresas) */}
+                            {tipo === 'empresa' && (
+                              <button
+                                type="button"
+                                onClick={() => openDrivers(client.client_id, nombre)}
+                                className="inline-flex items-center gap-1 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                                title="Ver conductores"
+                              >
+                                <Users className="h-4 w-4" />
+                                Conductores
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -461,6 +505,19 @@ const ClientsContent: React.FC = () => {
           onClose={() => setLimitsClientId(null)}
         />
       )}
+
+      {/* 👇 Modal global de conductores montado en portal */}
+      {mounted && driversOpen && driversCompanyId != null &&
+        createPortal(
+          <CompanyDriversModal
+            open={driversOpen}
+            onClose={() => setDriversOpen(false)}
+            companyId={driversCompanyId}
+            companyName={driversCompanyName ?? undefined}
+          />,
+          document.body
+        )
+      }
     </div>
   );
 };
@@ -478,16 +535,8 @@ function ActiveLimitsCell({ clientId }: { clientId: number }) {
         const rows = await listClientLimits(clientId, { onlyActive: true });
         if (!mounted) return;
 
-        // --- Opción 1 (actual): contar límites activos
         const count = Array.isArray(rows) ? rows.length : 0;
         setText(count === 0 ? '0' : `${count} activo${count > 1 ? 's' : ''}`);
-
-        // --- Opción 2: sumar galones
-        // const total = (Array.isArray(rows) ? rows : []).reduce(
-        //   (acc: number, r: any) => acc + Number(r.maxGallons || 0),
-        //   0
-        // );
-        // setText(`${total.toFixed(3)} gal`);
       } catch {
         if (!mounted) return;
         setText('err');

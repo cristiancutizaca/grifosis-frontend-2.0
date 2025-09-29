@@ -77,6 +77,24 @@ export interface BulkPaymentsResponse {
   totalAmount: number;
 }
 
+// ====== Auto allocate (pago automático por monto) ======
+export interface AutoAllocateBody {
+  amount: number;
+  payment_method_id: number;
+  user_id: number;
+  notes?: string;
+  /** 'due' (default) | 'created' */
+  order?: 'due' | 'created';
+}
+export interface AutoAllocateResponse {
+  ok: boolean;
+  totalRequested: number;
+  allocated: number;
+  leftover: number;
+  payments: PaymentRow[];
+  updatedCredits: Credit[];
+}
+
 export interface CreditStats {
   totalCredits: number;
   totalDebt: number;
@@ -161,6 +179,19 @@ class CreditService {
    */
   async addPaymentsBulk(body: BulkPaymentsBody): Promise<BulkPaymentsResponse> {
     return apiService.post<BulkPaymentsResponse>(`${this.endpoint}/payments/bulk`, body);
+  }
+
+  /**
+   * ✅ Pago automático por monto (sin seleccionar créditos):
+   * POST /credits/clients/:clientId/payments/auto
+   * Body: { amount, payment_method_id, user_id, notes?, order? }
+   * Respuesta: { ok, totalRequested, allocated, leftover, payments, updatedCredits }
+   */
+  async autoAllocatePayment(clientId: number, body: AutoAllocateBody): Promise<AutoAllocateResponse> {
+    return apiService.post<AutoAllocateResponse>(
+      `${this.endpoint}/clients/${clientId}/payments/auto`,
+      body
+    );
   }
 
   // Obtener créditos pendientes (con deuda)
