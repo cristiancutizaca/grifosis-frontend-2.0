@@ -2,27 +2,42 @@
 import apiService from './apiService';
 import { Credit as Credito } from '../../app/grifo/types/dashboard';
 
-// ===== Tipos que coinciden con el backend =====
+/* ============================
+   Tipos compartidos con backend
+   ============================ */
+
 export interface Credit {
   credit_id: number;
   client_id: number;
-  sale_id?: number;
+  sale_id?: number | null;
+  driver_id?: number | null;            // 👈 NUEVO
   credit_amount: number;
   amount_paid: number;
-  due_date: string;
+  due_date: string;                     // ISO
   status: 'pending' | 'paid' | 'overdue';
   created_at: string;
   updated_at: string | null;
+
   client?: {
     client_id: number;
     name?: string;
     email?: string;
     phone?: string;
+    company_name?: string;
   };
   sale?: {
     sale_id: number;
     total_amount?: number;
   };
+  // 👇 NUEVO: info del conductor (si se cargó con relaciones)
+  driver?: {
+    driver_id: number;
+    company_id: number;
+    full_name: string;
+    dni?: string | null;
+    plate?: string | null;
+    phone?: string | null;
+  } | null;
 }
 
 export interface CreditsDashboard {
@@ -33,7 +48,8 @@ export interface CreditsDashboard {
 
 export interface CreateCreditData {
   client_id: number;
-  sale_id?: number;
+  sale_id?: number | null;
+  driver_id?: number | null;            // 👈 NUEVO (opcional)
   credit_amount: number;
   due_date: string; // ISO
 }
@@ -77,7 +93,7 @@ export interface BulkPaymentsResponse {
   totalAmount: number;
 }
 
-// ====== Auto allocate (pago automático por monto) ======
+// ====== Auto allocate (pago automático por monto - por cliente) ======
 export interface AutoAllocateBody {
   amount: number;
   payment_method_id: number;
@@ -95,6 +111,38 @@ export interface AutoAllocateResponse {
   updatedCredits: Credit[];
 }
 
+/* ====== NUEVO: créditos por empresa agrupados por conductor ====== */
+export interface CompanyCreditsGroup {
+  company_id: number;
+  company_name: string;
+  totals: { pending: number; overdue: number; totalDebt: number };
+  drivers: Array<{
+    driver: {
+      driver_id: number;
+      full_name: string;
+      dni?: string | null;
+      plate?: string | null;
+      phone?: string | null;
+    } | null; // null = créditos sin conductor
+    totalDebt: number;
+    credits: Credit[];
+  }>;
+}
+
+/* ====== NUEVO: autopago por empresa ====== */
+export interface AutoPayCompanyBody {
+  total_amount: number;
+  payment_method_id?: number;
+  user_id?: number;
+  notes?: string;
+  driver_ids?: number[]; // opcional: limitar a ciertos conductores
+}
+export interface AutoPayCompanyResponse {
+  allocated: { credit_id: number; amount: number }[];
+  leftover: number;
+  result: BulkPaymentsResponse;
+}
+
 export interface CreditStats {
   totalCredits: number;
   totalDebt: number;
@@ -102,6 +150,10 @@ export interface CreditStats {
   overdueCredits: number;
   paidCredits: number;
 }
+
+/* ============================
+   Servicio
+   ============================ */
 
 class CreditService {
   private endpoint = '/credits';
@@ -111,6 +163,7 @@ class CreditService {
    * Ej: { status: 'pending' }, { overdue: true }, etc.
    */
   async getAllCredits(filters?: Record<string, any>): Promise<Credit[]> {
+    // include=client (legacy) — el backend lo ignora, pero se mantiene por compat
     let url = `${this.endpoint}?include=client`;
 
     const params = new URLSearchParams();
@@ -156,10 +209,7 @@ class CreditService {
   }
 
   /**
-   * ✅ Pagar un crédito (UNITARIO):
-   * POST /credits/:id/payments
-   * Acepta 'reference' o 'notes' (se envía como 'reference').
-   * Devuelve el crédito actualizado.
+   * ✅ Pagar un crédito (UNITARIO)
    */
   async addPayment(creditId: number, payload: PaymentData): Promise<Credit> {
     const body = {
@@ -172,24 +222,44 @@ class CreditService {
   }
 
   /**
-   * ✅ Pagar múltiples créditos (BULK):
-   * POST /credits/payments/bulk
-   * Body: { items: [{credit_id, amount}], payment_method_id?, user_id?, notes? }
-   * Respuesta: { updated, payments, count, totalAmount }
+   * ✅ Pagar múltiples créditos (BULK)
    */
   async addPaymentsBulk(body: BulkPaymentsBody): Promise<BulkPaymentsResponse> {
     return apiService.post<BulkPaymentsResponse>(`${this.endpoint}/payments/bulk`, body);
   }
 
   /**
-   * ✅ Pago automático por monto (sin seleccionar créditos):
-   * POST /credits/clients/:clientId/payments/auto
-   * Body: { amount, payment_method_id, user_id, notes?, order? }
-   * Respuesta: { ok, totalRequested, allocated, leftover, payments, updatedCredits }
+   * ✅ Pago automático por monto (cliente)
    */
-  async autoAllocatePayment(clientId: number, body: AutoAllocateBody): Promise<AutoAllocateResponse> {
+  async autoAllocatePayment(
+    clientId: number,
+    body: AutoAllocateBody
+  ): Promise<AutoAllocateResponse> {
     return apiService.post<AutoAllocateResponse>(
       `${this.endpoint}/clients/${clientId}/payments/auto`,
+      body
+    );
+  }
+
+  /* ====== NUEVO: créditos por EMPRESA (agrupados por conductor) ====== */
+  async getCompanyCreditsGrouped(
+    companyId: number,
+    opts?: { onlyPending?: boolean }
+  ): Promise<CompanyCreditsGroup> {
+    const u = new URLSearchParams();
+    if (opts?.onlyPending) u.set('onlyPending', 'true');
+    const qs = u.toString();
+    const url = `${this.endpoint}/company/${companyId}${qs ? `?${qs}` : ''}`;
+    return apiService.get<CompanyCreditsGroup>(url, { cache: 'no-store' } as RequestInit);
+  }
+
+  /* ====== NUEVO: autopago por EMPRESA ====== */
+  async autoPayCompany(
+    companyId: number,
+    body: AutoPayCompanyBody
+  ): Promise<AutoPayCompanyResponse> {
+    return apiService.post<AutoPayCompanyResponse>(
+      `${this.endpoint}/company/${companyId}/payments/auto`,
       body
     );
   }
@@ -259,7 +329,10 @@ class CreditService {
         } else {
           clientsMap.set(clientId, {
             client_id: clientId,
-            name: credit.client?.name || `Cliente ${clientId}`,
+            name:
+              credit.client?.name ||
+              credit.client?.company_name ||
+              `Cliente ${clientId}`,
             totalDebt: debt,
             creditsCount: 1,
           });

@@ -143,21 +143,18 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
   // reset de filas cuando cambia cliente/lista o se abre
   useEffect(() => {
     if (!open) return;
-    const nextAmts: Record<number, string> = {};
-    selectedClientPendingCredits.forEach((cr) => {
-      const saldo = Math.max(0, num(cr.credit_amount) - num(cr.amount_paid));
-      nextAmts[cr.credit_id] = saldo.toFixed(2);
-    });
-    setRowAmounts(nextAmts);
+    // 👉 AHORA los inputs se muestran VACÍOS cada apertura/cambio:
+    setRowAmounts({});
     setSelectedMap({});
     setSelectAll(false);
   }, [open, selectedClientPendingCredits]);
 
-  // ✅ reset del monto y del modo cada vez que se abre el modal
+  // ✅ reset del monto, modo y referencia cada vez que se abre el modal
   useEffect(() => {
     if (!open) return;
     setAutoAmount('');     // deja el input vacío
-    setAutoMode(true);     // opcional: siempre abre en modo automático
+    setAutoMode(true);     // abre en modo automático
+    setReference('');      // limpia referencia de sesiones previas
     setError(null);        // limpia errores antiguos
   }, [open]);
 
@@ -487,9 +484,10 @@ export default function CreditPayModal({ open, onClose, defaultClientId = null, 
                                   step="0.01"
                                   min={0}
                                   max={saldo}
-                                  value={rowAmounts[cr.credit_id] ?? saldo.toFixed(2)}
+                                  value={rowAmounts[cr.credit_id] ?? ''}  // 👉 vacío por defecto
+                                  placeholder={saldo.toFixed(2)}          // muestra el saldo como guía
                                   onChange={(e) => setRowAmounts((prev) => ({ ...prev, [cr.credit_id]: e.target.value }))}
-                                  className="w-28 bg-transparent py-1 text-right text-white outline-none placeholder-slate-400"
+                                  className="w-28 bg-transparent py-1 text-right text-white outline-none placeholder-slate-500"
                                 />
                               </div>
                             </label>

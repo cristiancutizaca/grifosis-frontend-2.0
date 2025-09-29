@@ -1,4 +1,3 @@
-// app/grifo-ventas/GrifoNewSale.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -25,15 +24,14 @@ import NozzleSelectionModal from './components/NozzleSelectionModal';
 // Config + Métodos de pago
 import settingsService from '../../src/services/settingsService';
 import paymentMethodService from '../../src/services/paymentMethodService';
-
 // Colores por producto
 import { getClassesForProduct } from '../../src/utils/productColors';
-
 // Servicio de caja
 import cashBoxService from '../../src/services/cashBoxService';
-
 // Para consultar endpoints sin crear servicios nuevos
 import apiService from '../../src/services/apiService';
+// 2.1: Importa el servicio de conductores
+import clientDriversService, { ClientDriver } from '../../src/services/clientDriversService';
 
 /* ---------- HELPERS / CONST ---------- */
 import { decodeUserIdFromJWT } from '../../src/utils/jwt';
@@ -84,11 +82,11 @@ async function urlToBase64NoPrefix(url: string): Promise<string | undefined> {
 async function fetchEmpresaFromSettings(): Promise<EmpresaHeader> {
   const s: any = await settingsService.getSettings().catch(() => null);
 
-  const nombre    = s?.grifo_name        ?? s?.company_name    ?? s?.name       ?? s?.nombre ?? 'GRIFO';
-  const ruc       = s?.ruc               ?? s?.company_ruc     ?? s?.ruc_number ?? undefined;
-  const direccion = s?.direccion         ?? s?.company_address ?? s?.address    ?? undefined;
-  const telefono  = s?.telefono          ?? s?.company_phone   ?? s?.phone      ?? undefined;
-  const email     = s?.email             ?? s?.company_email   ?? undefined;
+  const nombre    = s?.grifo_name        ?? s?.company_name    ?? s?.name        ?? s?.nombre ?? 'GRIFO';
+  const ruc       = s?.ruc                ?? s?.company_ruc     ?? s?.ruc_number  ?? undefined;
+  const direccion = s?.direccion          ?? s?.company_address ?? s?.address     ?? undefined;
+  const telefono  = s?.telefono           ?? s?.company_phone   ?? s?.phone      ?? undefined;
+  const email     = s?.email              ?? s?.company_email   ?? undefined;
 
   const base64Directo = s?.company_logo_base64 ?? s?.logo_base64 ?? undefined;
   const logoUrl       = s?.company_logo_url ?? s?.logo_url ?? s?.logo ?? undefined;
@@ -136,10 +134,10 @@ const STORAGE_FLAG = 'turno:caja:open-flag';
 
 const GrifoNewSale: React.FC = () => {
   const [selectedFuel, setSelectedFuel] = useState<FuelType>('Premium');
-  const [quantity, setQuantity] = useState<string>('');          // se calcula desde importe o se escribe en galones
+  const [quantity, setQuantity] = useState<string>('');       // se calcula desde importe o se escribe en galones
   const [paymentMethod, setPaymentMethod] = useState<PaymentKey>('CASH');
 
-  const [discount, setDiscount] = useState<string>('0');         // S/ total (se calcula)
+  const [discount, setDiscount] = useState<string>('0');       // S/ total (se calcula)
   const [observations, setObservations] = useState<string>('');
 
   const [, setTaxRate] = useState<number>(0.18);
@@ -159,9 +157,19 @@ const GrifoNewSale: React.FC = () => {
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [searchingClients, setSearchingClients] = useState(false);
-
-  // >>> NUEVO: ref del contenedor del buscador para cerrar al hacer click fuera
   const clientBoxRef = useRef<HTMLDivElement>(null);
+
+  // 2.2: Estado para conductores (solo cuando el cliente seleccionado es empresa)
+  const [drivers, setDrivers] = useState<ClientDriver[]>([]);
+  const [driversLoading, setDriversLoading] = useState(false);
+  const [driverSearch, setDriverSearch] = useState('');
+  const [showDriverDropdown, setShowDriverDropdown] = useState(false);
+  const [selectedDriver, setSelectedDriver] = useState<ClientDriver | null>(null);
+  const driverBoxRef = useRef<HTMLDivElement>(null);
+  const isCompany = (c: any | null) => {
+    const t = (c?.client_type ?? c?.tipo_cliente ?? '').toString().toLowerCase();
+    return t === 'empresa';
+  };
 
   // Productos / surtidores
   const [pumpNozzles, setPumpNozzles] = useState<any[]>([]);
@@ -170,14 +178,12 @@ const GrifoNewSale: React.FC = () => {
   const [nozzleByProduct, setNozzleByProduct] = useState<Record<number, number>>({});
   const [currentPumpNozzles, setCurrentPumpNozzles] = useState<Nozzle[]>([]);
   const [selectedNozzleId, setSelectedNozzleId] = useState<number | null>(null);
-
   const [showNozzleModal, setShowNozzleModal] = useState(false);
   const [nozzlesForModal, setNozzlesForModal] = useState<NozzleInGroup[]>([]);
-
-
+  
   // Tarjetas fusionadas tanque+boquilla
   const [mergedCards, setMergedCards] = useState<Array<{ nozzle_id: number | null; producto: Product; disabled?: boolean }>>([]);
-
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -188,7 +194,6 @@ const GrifoNewSale: React.FC = () => {
 
   // Métodos de pago dinámicos
   const [availablePayments, setAvailablePayments] = useState<PaymentOption[]>([]);
-
   const [recentSales, setRecentSales] = useState<any[]>([]);
   const [loadingRecentSales, setLoadingRecentSales] = useState(false);
 
@@ -198,14 +203,12 @@ const GrifoNewSale: React.FC = () => {
 
   // ===== NUEVO: cache de encabezado de empresa para el PDF
   const [empresaInfo, setEmpresaInfo] = useState<EmpresaHeader | null>(null);
-
+  
   // ===== NUEVO: descuentos de configuración
   const [discounts, setDiscounts] = useState<ConfigDiscount[]>([]);
   const [selectedDiscountId, setSelectedDiscountId] = useState<number | null>(null);
-
-  // >>> NUEVO: tarifa manual por galón (si el usuario edita 0.30 / 0.35, etc.)
   const [customDiscountRate, setCustomDiscountRate] = useState<number | null>(null);
-
+  
   const RECENT_LIMIT = 25;
 
   /** Paginación local */
@@ -223,6 +226,20 @@ const GrifoNewSale: React.FC = () => {
     return m;
   }, [clients]);
 
+  // 2.3: Filtro local de conductores
+  const filteredDrivers = useMemo(() => {
+    const term = (driverSearch || '').trim().toLowerCase();
+    if (!term) return drivers.slice(0, 20);
+    return drivers
+      .filter(d => {
+        const name = (d.full_name || '').toLowerCase();
+        const dni = (d.dni || '').toLowerCase();
+        const plate = (d.plate || '').toLowerCase();
+        return name.includes(term) || dni.includes(term) || plate.includes(term);
+      })
+      .slice(0, 20);
+  }, [drivers, driverSearch]);
+
   /** Crédito */
   const [isCredit, setIsCredit] = useState<boolean>(false);
   const [dueDate, setDueDate] = useState<string>('');
@@ -234,7 +251,6 @@ const GrifoNewSale: React.FC = () => {
   // =============================== NUEVO: pestaña y listados de Pagos de crédito ===============================
   type RecentTab = 'ventas' | 'pagosCredito'; // NUEVO
   const [recentTab, setRecentTab] = useState<RecentTab>('ventas'); // NUEVO
-
   const CREDIT_PAGE_SIZE = 5; // NUEVO
   const [creditPays, setCreditPays] = useState<CreditPaymentItem[]>([]); // NUEVO
   const [creditPaysLoading, setCreditPaysLoading] = useState(false); // NUEVO
@@ -506,6 +522,45 @@ const GrifoNewSale: React.FC = () => {
     }
   }, [availablePayments]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 3.1: Cargar conductores cuando el cliente empresa cambia
+  useEffect(() => {
+    // reset al cambiar cliente
+    setSelectedDriver(null);
+    setDriverSearch('');
+    setDrivers([]);
+    setShowDriverDropdown(false);
+
+    if (!selectedClient || !isCompany(selectedClient)) return;
+
+    (async () => {
+      try {
+        setDriversLoading(true);
+        const list = await clientDriversService.list(Number(selectedClient.id));
+        setDrivers(Array.isArray(list) ? list : []);
+      } catch {
+        setDrivers([]);
+      } finally {
+        setDriversLoading(false);
+      }
+    })();
+  }, [selectedClient]);
+
+  // 3.2: Cerrar dropdown de conductor con click fuera / Escape
+  useEffect(() => {
+    if (!showDriverDropdown) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const box = driverBoxRef.current;
+      if (box && !box.contains(e.target as Node)) setShowDriverDropdown(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowDriverDropdown(false); };
+    document.addEventListener('mousedown', onMouseDown, true);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown, true);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showDriverDropdown]);
+
   /* ======================= Caja abierta? ======================= */
   const resolveShiftNames = (d = new Date()) => {
     const m = d.getHours() * 60 + d.getMinutes();
@@ -526,7 +581,6 @@ const GrifoNewSale: React.FC = () => {
     try {
       const { api, ui } = resolveShiftNames();
       const day = operationalDateYMD(new Date(), api);
-
       const res: any = await cashBoxService.getToday({ date: day, shift: api });
 
       const opened =
@@ -682,7 +736,6 @@ const GrifoNewSale: React.FC = () => {
   );
   const anyEligible = discounts.some(d => gallonsNum >= d.gallons);
 
-  // Si cambia la cantidad y ya no cumple la regla seleccionada, solo reseteamos si NO hay tarifa manual
   useEffect(() => {
     if (selectedDiscount && gallonsNum < selectedDiscount.gallons && customDiscountRate == null) {
       setSelectedDiscountId(null);
@@ -690,9 +743,6 @@ const GrifoNewSale: React.FC = () => {
     }
   }, [gallonsNum, selectedDiscount, customDiscountRate]);
 
-  // >>> Recalcular S/ total cuando cambian galones:
-  //     - Si hay tarifa manual, usamos esa (customDiscountRate)
-  //     - Si no, y hay regla seleccionada que cumple, usamos la regla
   useEffect(() => {
     if (gallonsNum <= 0) {
       setDiscount('0');
@@ -729,7 +779,6 @@ const GrifoNewSale: React.FC = () => {
   };
 
   const DEBOUNCE_MS = 300;
-
   const normalize = (s: string) =>
     (s || '')
       .normalize('NFD')
@@ -788,7 +837,6 @@ const GrifoNewSale: React.FC = () => {
     return () => clearTimeout(t);
   }, [clientSearchTerm, showClientSearch]);
 
-  // >>> NUEVO: cerrar dropdown al hacer clic fuera o presionar Escape
   useEffect(() => {
     if (!showClientSearch || !showClientDropdown) return;
 
@@ -821,7 +869,6 @@ const GrifoNewSale: React.FC = () => {
   };
 
   /* ------------------ Selección de producto + boquilla ------------------ */
-  // AHORA acepta preselectedNozzleId opcional para saltar el modal cuando viene desde la tarjeta
   const handleProductSelect = (product: Product, preselectedNozzleId?: number) => {
     setSelectedProduct(product);
     setSelectedFuel(toFuelType(String(product.nombre)));
@@ -844,7 +891,6 @@ const GrifoNewSale: React.FC = () => {
         const pidSel = Number(product.id);
         if (pidNz && pidSel && pidNz === pidSel) return true;
 
-        // fallback por nombre (por si los IDs no calzan)
         const nameNz = String(a.product?.name ?? a.producto?.nombre ?? '').trim().toLowerCase();
         const nameSel = String(product.nombre ?? '').trim().toLowerCase();
         return !!nameNz && !!nameSel && nameNz === nameSel;
@@ -911,6 +957,12 @@ const GrifoNewSale: React.FC = () => {
         if (!selectedClient) { setError('Para ventas a crédito, seleccione un cliente.'); return; }
         if (!dueDate) { setError('Seleccione la fecha de vencimiento del crédito.'); return; }
       }
+      
+      // 6: Validaciones mínimas
+      if (paymentMethod === 'CREDIT' && selectedClient && isCompany(selectedClient) && !selectedDriver) {
+        setError('Para ventas a crédito de empresa, selecciona un conductor.');
+        return;
+      }
 
       let nozzle_id: number | null = selectedNozzleId;
       if (nozzle_id == null || Number.isNaN(nozzle_id)) {
@@ -928,11 +980,9 @@ const GrifoNewSale: React.FC = () => {
 
       const rate = IGV_BY_FUEL[toFuelType(selectedProduct?.nombre) as keyof typeof IGV_BY_FUEL] ?? 0.18;
 
-      // ===== MONTOS CONSISTENTES (SIEMPRE en S/ con IGV) =====
       const unitPriceWithIgv = Number(selectedProduct?.precio || 0);
       if (!(unitPriceWithIgv > 0)) { setError('El producto no tiene precio válido.'); return; }
 
-      // Bruto ANTES de descuento y galones
       let grossBeforeDiscount = 0;
       let volumeGallons = 0;
 
@@ -945,78 +995,63 @@ const GrifoNewSale: React.FC = () => {
         grossBeforeDiscount = +(volumeGallons * unitPriceWithIgv).toFixed(2);
       }
 
-      // Descuento aplicado (cap para no pasar el monto)
       const discNum = Math.max(0, Number(discount) || 0);
       const discountApplied = Math.min(discNum, grossBeforeDiscount);
-
-      // Bruto POST-DESCUENTO (para notas / ticket)
       const finalGross = +(grossBeforeDiscount - discountApplied).toFixed(2);
       if (finalGross <= 0) { setError('El total a pagar debe ser mayor a 0'); return; }
 
-      // Neto/base POST-DESCUENTO (sin IGV) -> para DTO
       const totalNet = +((finalGross) / (1 + rate)).toFixed(2);
-
       const baseNotes = observations || '';
       const notesWithGross = `${baseNotes}${baseNotes ? ' ' : ''}[pagado_bruto=${finalGross.toFixed(2)}]`;
-
       const { api } = resolveShiftNames();
 
       const payload: any = {
         user_id: currentUserId,
         client_id: showClientSearch && selectedClient ? selectedClient.id : null,
         nozzle_id: Number(nozzle_id),
-
         unit_price: +unitPriceWithIgv.toFixed(2),
         volume_gallons: +volumeGallons.toFixed(3),
         gross_amount: +grossBeforeDiscount.toFixed(2),
-
         total_amount: totalNet,
         final_amount: finalGross,
-
         payment_method_id: pm.id,
         payment_method: pm.label,
         notes: notesWithGross || undefined,
         status: 'completed',
         shift: api,
-
         applyDynamicPricing: false,
         igv_rate: rate,
         ...(discountApplied > 0 ? { discount_amount: +discountApplied.toFixed(2) } : {}),
       };
 
       if (paymentMethod === 'CREDIT' && dueDate) payload.due_date = dueDate;
+      
+      // 5: Payload: enviar el conductor (si hay)
+      if (selectedClient && isCompany(selectedClient) && selectedDriver) {
+        payload.company_driver_id = Number(selectedDriver.driver_id);
+        payload.notes = `${payload.notes || ''} [driver_name=${selectedDriver.full_name}] [driver_dni=${selectedDriver.dni || ''}] [driver_plate=${selectedDriver.plate || ''}]`.trim();
+      }
 
       // ===== 1) Registrar venta
       const sale = await saleService.createSale(payload);
 
       // ===== (RÁPIDO) Registrar lectura de medidor como NUEVO registro
       try {
-        // 1) Traer la última lectura final de esta boquilla para usarla como "initial"
-        const last = await apiService
-          .get(`/meter-readings/nozzle/${nozzle_id}/last`)
-          .catch(() => null);
-
-        // Soporta distintos nombres de campo por si la API devuelve "final" o "final_reading"
-// Soporta distintos nombres de campo por si la API devuelve "final" o "final_reading"
-          const l: any = Array.isArray(last) ? (last[0] ?? {}) : (last ?? {});
-          const initial = Number(l.final ?? l.final_reading ?? 0) || 0;
-
-        // 2) Crear un NUEVO registro (no editar el anterior)
+        const last = await apiService.get(`/meter-readings/nozzle/${nozzle_id}/last`).catch(() => null);
+        const l: any = Array.isArray(last) ? (last[0] ?? {}) : (last ?? {});
+        const initial = Number(l.final ?? l.final_reading ?? 0) || 0;
         await apiService.post('/meter-readings', {
           nozzle_id: Number(nozzle_id),
           user_id: Number(currentUserId),
-          initial,                                                     // lectura ANTES
-          final: +(initial + Number(volumeGallons || 0)).toFixed(3),   // lectura DESPUÉS
-          shift: api,                                                  // 'Leon' | 'Lobo' | 'Buho'
+          initial,
+          final: +(initial + Number(volumeGallons || 0)).toFixed(3),
+          shift: api,
           status: 'registered',
           reading_timestamp: new Date().toISOString(),
         });
       } catch (e) {
         console.warn('MeterReading: no se pudo registrar la lectura nueva:', e);
-        // No bloqueamos la venta si falla
       }
-      
-
 
       // ===== 2) PDF
       try {
@@ -1053,6 +1088,10 @@ const GrifoNewSale: React.FC = () => {
           payment_method: { name: sale.payment_method } as any,
           notes: paymentMethod === 'CREDIT' ? 'Venta a crédito' : observations || undefined,
         };
+        
+        // 8: PDF/Recibo (opcional pero recomendado)
+        const driverLine = selectedDriver ? `Conductor: ${selectedDriver.full_name}${selectedDriver.plate ? ' · Placa: ' + selectedDriver.plate : ''}` : '';
+        venta.notes = [venta.notes, driverLine].filter(Boolean).join(' | ');
 
         const empresa = empresaInfo ?? await fetchEmpresaFromSettings();
 
@@ -1104,7 +1143,11 @@ const GrifoNewSale: React.FC = () => {
     setIsCredit(false);
     setDueDate('');
     setSelectedDiscountId(null);
-    setCustomDiscountRate(null); // >>> reset tarifa manual
+    setCustomDiscountRate(null);
+    // 9: UX y resets
+    setSelectedDriver(null);
+    setDriverSearch('');
+    setDrivers([]);
   };
 
   const handleCancel = () => {
@@ -1126,7 +1169,11 @@ const GrifoNewSale: React.FC = () => {
       setDueDate('');
       setMergedCards([]);
       setSelectedDiscountId(null);
-      setCustomDiscountRate(null); // >>> reset tarifa manual
+      setCustomDiscountRate(null);
+      // 9: UX y resets (también en cancelar)
+      setSelectedDriver(null);
+      setDriverSearch('');
+      setDrivers([]);
     }
   };
 
@@ -1165,7 +1212,7 @@ const GrifoNewSale: React.FC = () => {
           pump_id,
           product_name,
           unit_price: Number.isFinite(unit_price) && unit_price > 0 ? unit_price : undefined,
-          nozzle_number: Number.isFinite(nozzle_number) ? nozzle_number : undefined, // <- NUEVO
+          nozzle_number: Number.isFinite(nozzle_number) ? nozzle_number : undefined,
         });
       }
 
@@ -1181,10 +1228,8 @@ const GrifoNewSale: React.FC = () => {
           pumpNameById.get(nz?.pump_id ?? -1) ??
           (nz?.pump_id ? `Surtidor ${nz.pump_id}` : 'Surtidor —');
         const unitPrice = nz?.unit_price ?? (productName ? priceByFuel[productName] ?? 0 : 0);
-
-        const totalBaseNet = Number(s.total_amount ?? 0);
+        
         const finalNet = Number(s.final_amount ?? s.total_amount ?? 0);
-
         const discountAmount = Number.isFinite(Number(s.discount_amount))
           ? Number(s.discount_amount)
           : Math.max(0, (Number(s.gross_amount ?? 0) || 0) - finalNet);
@@ -1212,13 +1257,17 @@ const GrifoNewSale: React.FC = () => {
         const labelFallback = getPaymentLabel(s) || '';
         const paymentLabel = labelFromPayload || labelFromCatalog || labelFallback || '—';
 
+        // 7: Ventas recientes: mostrar conductor
+        const driverNameFromNotes = /\[driver_name=([^\]]+)\]/i.exec(String(s.notes || ''))?.[1];
+        const driverTag = driverNameFromNotes ? ` · Conductor: ${driverNameFromNotes}` : '';
+
         return {
           ...s,
           _ui: {
             clientName: uiClientName,
             productName,
             pumpName,
-            nozzleNumber: nz?.nozzle_number, // <- NUEVO
+            nozzleNumber: nz?.nozzle_number,
             gallons,
             amountDisplay: finalNet,
             time: fmtTime(s.sale_timestamp),
@@ -1227,6 +1276,7 @@ const GrifoNewSale: React.FC = () => {
             discountText:
               discountAmount > 0 ? `Desc: S/ ${discountAmount.toFixed(2)}` : 'Sin descuento',
             paymentLabel,
+            driverTag, // Agregado para usar en el render
           },
         };
       });
@@ -1252,7 +1302,6 @@ const GrifoNewSale: React.FC = () => {
 
   /* ============================== MODAL: Descuento + Observaciones ============================== */
   const [extrasOpen, setExtrasOpen] = useState(false);
-  // >>> ahora guardamos tarifa temporal por galón (no total en S/)
   const [tmpDiscountRate, setTmpDiscountRate] = useState<string>('0');
   const [tmpObs, setTmpObs] = useState<string>('');
   const openExtras = () => {
@@ -1301,7 +1350,6 @@ const GrifoNewSale: React.FC = () => {
 
       {/* Contenido */}
       <div className={`mx-auto max-w-screen-2xl space-y-3 px-2 py-3 sm:p-3 md:p-4 ${cashOpen === false ? 'pointer-events-none select-none opacity-60' : ''}`}>
-        {/* Mensaje final */}
         {/* Mensajes */}
         {error && (
           <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-red-200">
@@ -1380,6 +1428,58 @@ const GrifoNewSale: React.FC = () => {
           </div>
         </div>
 
+        {/* 4: UI para seleccionar CONDUCTOR */}
+        {selectedClient && isCompany(selectedClient) && (
+          <div className="mt-3 rounded-lg border border-slate-700/60 bg-slate-900/60 p-3 sm:p-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <h3 className="flex shrink-0 items-center gap-1 text-sm font-semibold text-white">
+                <User className="text-emerald-400" size={14} /> Conductor (empresa)
+              </h3>
+
+              <div ref={driverBoxRef} className="relative flex-1 min-w-[220px]">
+                <div className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1">
+                  <Search size={14} className="text-emerald-400 shrink-0" />
+                  <input
+                    type="text"
+                    value={driverSearch}
+                    onChange={(e) => { setDriverSearch(e.target.value); setShowDriverDropdown(true); }}
+                    onFocus={() => setShowDriverDropdown(true)}
+                    placeholder={driversLoading ? 'Cargando conductores…' : 'Buscar por nombre, DNI o placa…'}
+                    className="h-10 w-full rounded-md border border-slate-600/70 bg-slate-700/90 px-2 text-sm text-white placeholder:text-slate-400 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20"
+                    disabled={driversLoading}
+                  />
+                </div>
+
+                {showDriverDropdown && (
+                  <div className="absolute left-0 right-0 z-10 mt-1 max-h-72 overflow-y-auto rounded-md border border-slate-700 bg-slate-800 text-xs shadow-xl">
+                    {driversLoading && <div className="px-3 py-1.5 text-slate-300">Cargando…</div>}
+                    {!driversLoading && filteredDrivers.length === 0 && (
+                      <div className="px-3 py-1.5 text-slate-400">Sin resultados</div>
+                    )}
+                    {!driversLoading && filteredDrivers.map((d) => (
+                      <button
+                        key={d.driver_id}
+                        type="button"
+                        onClick={() => { setSelectedDriver(d); setDriverSearch(`${d.full_name} · ${d.plate || d.dni || ''}`); setShowDriverDropdown(false); }}
+                        className="block w-full px-3 py-1.5 text-left text-white hover:bg-slate-700"
+                      >
+                        <div className="font-medium truncate">{d.full_name}</div>
+                        <div className="text-[11px] text-slate-400">DNI: {d.dni || '—'} · Placa: {d.plate || '—'}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {selectedDriver && (
+                <span className="shrink-0 rounded-full bg-emerald-600/30 px-2 py-1 text-xs text-emerald-100">
+                  Seleccionado: {selectedDriver.full_name}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* =================== ARRIBA: Surtidores + Productos + Operación + Pago/Acciones =================== */}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-12">
           {/* IZQUIERDA */}
@@ -1414,13 +1514,8 @@ const GrifoNewSale: React.FC = () => {
                   productCards.map((noz: any) => {
                     const p = noz.producto!;
                     const isSelected = selectedProduct?.id === p.id;
-
-                    const base =
-                      `min-w-0 w-full h-[60px] rounded-lg ring-1 ring-white/10 shadow-sm transition-all ` +
-                      `flex items-center gap-3 px-3 hover:-translate-y-0.5 hover:shadow`;
-
+                    const base = `min-w-0 w-full h-[60px] rounded-lg ring-1 ring-white/10 shadow-sm transition-all flex items-center gap-3 px-3 hover:-translate-y-0.5 hover:shadow`;
                     const color = getClassesForProduct({ id: p.id, ...(p as any).color_hex ? { color_hex: (p as any).color_hex } : {} });
-
                     const disabled = !!noz.disabled || noz.nozzle_id == null;
 
                     return (
@@ -1437,7 +1532,6 @@ const GrifoNewSale: React.FC = () => {
                               precio: Number(p.precio),
                               tipo: String(p.tipo),
                             };
-                            // 👉 IMPORTANTE: llamar SIN pasar nozzle_id para que abra el modal si hay varias
                             handleProductSelect(formattedProduct);
                           }}
                         disabled={disabled}
@@ -1466,13 +1560,9 @@ const GrifoNewSale: React.FC = () => {
                         </div>
 
                         {disabled ? (
-                          <span className="rounded-full bg-yellow-500/90 px-1.5 py-0.5 text-[10px] font-semibold text-black shrink-0">
-                            !
-                          </span>
+                          <span className="rounded-full bg-yellow-500/90 px-1.5 py-0.5 text-[10px] font-semibold text-black shrink-0">!</span>
                         ) : isSelected ? (
-                          <span className="rounded-full bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold shrink-0">
-                            ✓
-                          </span>
+                          <span className="rounded-full bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold shrink-0">✓</span>
                         ) : null}
                       </button>
                     );
@@ -1694,24 +1784,17 @@ const GrifoNewSale: React.FC = () => {
 
                 {pageSales.map((sale: any) => {
                   const key = sale.sale_id || sale.id;
-
-                  const clientName =
-                    sale._ui?.clientName ||
-                    sale.client?.name ||
-                    [sale.client?.first_name, sale.client?.last_name].filter(Boolean).join(' ') ||
-                    sale.client_name ||
-                    'Sin cliente';
-
+                  const clientName = sale._ui?.clientName || 'Sin cliente';
                   const productName = sale._ui?.productName ?? '—';
                   const pumpName = sale._ui?.pumpName ?? '—';
                   const gallons = sale._ui?.gallons != null ? Number(sale._ui.gallons).toFixed(2) : '—';
-
                   const amountDisplay = Number(sale._ui?.amountDisplay ?? 0).toFixed(2);
                   const dateTimeStr = sale._ui?.dateTime ?? fmtDateTime(sale.sale_timestamp);
                   const status = sale.status || 'completed';
                   const discountText = sale._ui?.discountText ?? 'Sin descuento';
                   const paymentLabel = sale._ui?.paymentLabel ?? '—';
                   const obsText = cleanNotes(sale?.notes);
+                  const driverTag = sale._ui?.driverTag || ''; // Usar el tag pre-calculado
 
                   return (
                     <div key={key} className="grid grid-cols-1 gap-1.5 py-1.5 sm:grid-cols-5 sm:items-center">
@@ -1721,9 +1804,9 @@ const GrifoNewSale: React.FC = () => {
                         </div>
                         <div className="text-sm text-slate-300 min-w-0">
                           <div className="font-medium text-white leading-tight truncate">{clientName}</div>
-                            <div className="text-xs text-slate-400 truncate">
-                              {pumpName}{sale._ui?.nozzleNumber ? ` · Boquilla ${sale._ui.nozzleNumber}` : ''}
-                            </div>
+                          <div className="text-xs text-slate-400 truncate">
+                            {pumpName}{sale._ui?.nozzleNumber ? ` · Boquilla ${sale._ui.nozzleNumber}` : ''}{driverTag}
+                          </div>
                         </div>
                       </div>
 

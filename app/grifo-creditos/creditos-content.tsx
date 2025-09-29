@@ -3,10 +3,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Shield, AlertTriangle, Search, Users, CreditCard,
-  ChevronDown, ChevronRight
+  ChevronDown, ChevronRight, RefreshCw
 } from 'lucide-react';
 
-import creditService, { Credit, CreditsDashboard } from '../../src/services/creditService';
+import creditService, {
+  Credit,
+  CreditsDashboard,
+  CompanyCreditsGroup,
+} from '../../src/services/creditService';
 import ClientService, { Client } from "../../src/services/clientService";
 import CreditPayModal from './modal/CreditPayModal';
 
@@ -83,6 +87,11 @@ const GrifoCreditManagement: React.FC = () => {
   const [cardFilter, setCardFilter] = useState<CardFilter>('all');
   const tableRef = useRef<HTMLDivElement>(null);
 
+  // 🔽 NUEVO: detalle de empresa -> conductores (lazy)
+  const [companyDetails, setCompanyDetails] = useState<
+    Record<number, { loading: boolean; data?: CompanyCreditsGroup; error?: string }>
+  >({});
+
   // ======== Carga inicial ========
   useEffect(() => {
     (async () => {
@@ -134,6 +143,15 @@ const GrifoCreditManagement: React.FC = () => {
       dict[c.client_id] = c.client_type === 'empresa' && c.company_name
         ? c.company_name
         : `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim();
+    });
+    return dict;
+  }, [clientes]);
+
+  const clientTypeById = useMemo(() => {
+    const dict: Record<number, 'persona' | 'empresa'> = {};
+    clientes.forEach(c => {
+      const t = (c.client_type === 'empresa') ? 'empresa' : 'persona';
+      dict[c.client_id] = t;
     });
     return dict;
   }, [clientes]);
@@ -227,21 +245,53 @@ const GrifoCreditManagement: React.FC = () => {
       default: return 'bg-gray-500/20 text-gray-400 border-gray-400';
     }
   };
-  const getGroupBadge = (g: GroupedClient) => {
-    if (g.statusSummary.overdue > 0) return { text: `Vencidos: ${g.statusSummary.overdue}`, cls: 'bg-red-500/20 text-red-400 border-red-400' };
-    if (g.statusSummary.pending > 0) return { text: `Pendientes: ${g.statusSummary.pending}`, cls: 'bg-yellow-500/20 text-yellow-400 border-yellow-400' };
-    return { text: 'Pagado', cls: 'bg-green-500/20 text-green-400 border-green-400' };
-  };
 
   // ======== Modal & acciones ========
   const openPayModal = (clientId: number) => { setPayModalClientId(clientId); setPayModalOpen(true); };
   const onPaidRefresh = async () => { await Promise.all([loadCredits(), loadDashboard()]); };
-  const toggleExpand = (clientId: number) => {
+
+  // Expandir / colapsar y, si es empresa, cargar conductores
+  const toggleExpand = async (clientId: number) => {
     setExpanded(prev => {
       const next = new Set(prev);
       next.has(clientId) ? next.delete(clientId) : next.add(clientId);
       return next;
     });
+
+    const type = clientTypeById[clientId];
+    if (type === 'empresa') {
+      setCompanyDetails(prev => ({
+        ...prev,
+        [clientId]: prev[clientId]?.data
+          ? prev[clientId] // ya cargado
+          : { loading: true },
+      }));
+
+      try {
+        if (!companyDetails[clientId]?.data) {
+          const data = await creditService.getCompanyCreditsGrouped(clientId, { onlyPending: false });
+          setCompanyDetails(prev => ({ ...prev, [clientId]: { loading: false, data } }));
+        }
+      } catch (e: any) {
+        setCompanyDetails(prev => ({
+          ...prev,
+          [clientId]: { loading: false, error: e?.message || 'No se pudo cargar conductores' },
+        }));
+      }
+    }
+  };
+
+  const refetchCompany = async (clientId: number) => {
+    setCompanyDetails(prev => ({ ...prev, [clientId]: { loading: true } }));
+    try {
+      const data = await creditService.getCompanyCreditsGrouped(clientId, { onlyPending: false });
+      setCompanyDetails(prev => ({ ...prev, [clientId]: { loading: false, data } }));
+    } catch (e: any) {
+      setCompanyDetails(prev => ({
+        ...prev,
+        [clientId]: { loading: false, error: e?.message || 'No se pudo cargar conductores' },
+      }));
+    }
   };
 
   // ======== Tarjetas clickeables ========
@@ -390,6 +440,7 @@ const GrifoCreditManagement: React.FC = () => {
               {grouped.map((g) => {
                 const isExpanded = expanded.has(g.client_id);
                 const isPayable = g.credits.some(cr => remaining(cr) > 0.0001);
+                const type = clientTypeById[g.client_id] ?? 'persona';
 
                 const ss = g.statusSummary;
                 const badge =
@@ -411,6 +462,9 @@ const GrifoCreditManagement: React.FC = () => {
                         >
                           {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
                           <span className="truncate">{g.name}</span>
+                          <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded border ${type === 'empresa' ? 'bg-blue-500/15 text-blue-300 border-blue-400/50' : 'bg-orange-500/15 text-orange-300 border-orange-400/50'}`}>
+                            {type === 'empresa' ? 'Empresa' : 'Natural'}
+                          </span>
                         </button>
                       </td>
                       <td className="hidden md:table-cell py-3 px-2 text-slate-300">{g.credits.length}</td>
@@ -431,66 +485,37 @@ const GrifoCreditManagement: React.FC = () => {
                               ? 'bg-green-500 hover:bg-green-600 text-white'
                               : 'bg-slate-700 text-slate-400 cursor-not-allowed'
                           }`}
-                          title={isPayable ? 'Pagar créditos de este cliente' : 'Sin saldo pendiente'}
+                          title={isPayable ? (type === 'empresa' ? 'Pagar créditos de la empresa (incluye conductores)' : 'Pagar créditos del cliente') : 'Sin saldo pendiente'}
                         >
                           Pagar
                         </button>
                       </td>
                     </tr>
 
-                    {/* Detalle (espejo del colgroup) */}
+                    {/* Detalle */}
                     {isExpanded && (
                       <tr className="border-b border-slate-700/50">
                         <td colSpan={7} className="p-0">
-                          <div className="bg-slate-900/40">
-                            <div className="overflow-x-auto">
-                              <table className="w-full table-fixed">
-                                <colgroup>
-                                  <col className={`${COLS.cliente}`} />
-                                  <col className={`hidden md:table-column ${COLS.creditos}`} />
-                                  <col className={`${COLS.monto}`} />
-                                  <col className={`${COLS.pagado}`} />
-                                  <col className={`${COLS.saldo}`} />
-                                  <col className={`${COLS.estado}`} />
-                                  <col className={`${COLS.acciones}`} />
-                                </colgroup>
-                                <thead>
-                                  <tr className="text-xs uppercase text-slate-400">
-                                    <th className="text-left py-2 pl-2 pr-2"></th>
-                                    <th className="hidden md:table-cell text-left py-2 px-2">Crédito</th>
-                                    <th className="text-right py-2 px-2">Monto Crédito</th>
-                                    <th className="text-right py-2 px-2">Pagado</th>
-                                    <th className="text-right py-2 px-2">Saldo</th>
-                                    <th className="text-left py-2 px-2">Estado</th>
-                                    <th className="text-left py-2 px-2">Vencimiento</th> {/* debajo de Acciones */}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {g.credits.map((cr) => {
-                                    const bal = remaining(cr);
-                                    const eff = effectiveStatus(cr);
-                                    return (
-                                      <tr key={cr.credit_id} className="border-t border-slate-800">
-                                        <td className="py-2 pl-2 pr-2"></td>
-                                        <td className="hidden md:table-cell py-2 px-2 text-slate-200">#{cr.credit_id}</td>
-                                        <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.credit_amount))}</td>
-                                        <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.amount_paid))}</td>
-                                        <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(bal)}</td>
-                                        <td className="py-2 px-2">
-                                          <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${getStatusColor(eff)}`}>
-                                            {eff === 'paid' ? 'Pagado' : eff === 'overdue' ? 'Vencido' : 'Pendiente'}
-                                          </span>
-                                        </td>
-                                        <td className="py-2 px-2 text-slate-300 whitespace-nowrap">
-                                          {(cr as any).due_date ? formatDate((cr as any).due_date) : '-'}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
+                          {/* Si es empresa: mostrar conductores.
+                              Si es natural: mostrar tabla de créditos (como antes). */}
+                          {type === 'empresa' ? (
+                            <CompanyDriversBlock
+                              companyId={g.client_id}
+                              companyName={g.name}
+                              detail={companyDetails[g.client_id]}
+                              onReload={() => refetchCompany(g.client_id)}
+                              formatCurrency={formatCurrency}
+                              formatDate={formatDate}
+                              getStatusColor={getStatusColor}
+                            />
+                          ) : (
+                            <ClientCreditsBlock
+                              credits={g.credits}
+                              formatCurrency={formatCurrency}
+                              formatDate={formatDate}
+                              getStatusColor={getStatusColor}
+                            />
+                          )}
                         </td>
                       </tr>
                     )}
@@ -552,3 +577,217 @@ const GrifoCreditManagement: React.FC = () => {
 };
 
 export default GrifoCreditManagement;
+
+/* =================== Bloque: créditos del cliente natural =================== */
+function ClientCreditsBlock({
+  credits,
+  formatCurrency,
+  formatDate,
+  getStatusColor,
+}: {
+  credits: Credit[];
+  formatCurrency: (n: number) => string;
+  formatDate: (s: string) => string;
+  getStatusColor: (s: string) => string;
+}) {
+  const COLS = {
+    empty: 'w-[20%]',
+    id: 'w-[6%]',
+    monto: 'w-[18%]',
+    pagado: 'w-[16%]',
+    saldo: 'w-[18%]',
+    estado: 'w-[10%]',
+    vence: 'w-[12%]',
+  };
+
+  return (
+    <div className="bg-slate-900/40">
+      <div className="overflow-x-auto">
+        <table className="w-full table-fixed">
+          <colgroup>
+            <col className={`${COLS.empty}`} />
+            <col className={`hidden md:table-column ${COLS.id}`} />
+            <col className={`${COLS.monto}`} />
+            <col className={`${COLS.pagado}`} />
+            <col className={`${COLS.saldo}`} />
+            <col className={`${COLS.estado}`} />
+            <col className={`${COLS.vence}`} />
+          </colgroup>
+          <thead>
+            <tr className="text-xs uppercase text-slate-400">
+              <th className="text-left py-2 pl-2 pr-2"></th>
+              <th className="hidden md:table-cell text-left py-2 px-2">Crédito</th>
+              <th className="text-right py-2 px-2">Monto Crédito</th>
+              <th className="text-right py-2 px-2">Pagado</th>
+              <th className="text-right py-2 px-2">Saldo</th>
+              <th className="text-left py-2 px-2">Estado</th>
+              <th className="text-left py-2 px-2">Vencimiento</th>
+            </tr>
+          </thead>
+          <tbody>
+            {credits.map((cr) => {
+              const bal = Math.max(0, num(cr.credit_amount) - num(cr.amount_paid));
+              const eff = isPaid(cr) ? 'paid' : isOverdue(cr) ? 'overdue' : 'pending';
+              return (
+                <tr key={cr.credit_id} className="border-t border-slate-800">
+                  <td className="py-2 pl-2 pr-2"></td>
+                  <td className="hidden md:table-cell py-2 px-2 text-slate-200">#{cr.credit_id}</td>
+                  <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.credit_amount))}</td>
+                  <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.amount_paid))}</td>
+                  <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(bal)}</td>
+                  <td className="py-2 px-2">
+                    <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${getStatusColor(eff)}`}>
+                      {eff === 'paid' ? 'Pagado' : eff === 'overdue' ? 'Vencido' : 'Pendiente'}
+                    </span>
+                  </td>
+                  <td className="py-2 px-2 text-slate-300 whitespace-nowrap">
+                    {(cr as any).due_date ? formatDate((cr as any).due_date) : '-'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* =================== Bloque: empresa -> conductores =================== */
+function CompanyDriversBlock({
+  companyId,
+  companyName,
+  detail,
+  onReload,
+  formatCurrency,
+  formatDate,
+  getStatusColor,
+}: {
+  companyId: number;
+  companyName: string;
+  detail?: { loading: boolean; data?: CompanyCreditsGroup; error?: string };
+  onReload: () => void;
+  formatCurrency: (n: number) => string;
+  formatDate: (s: string) => string;
+  getStatusColor: (s: string) => string;
+}) {
+  if (!detail || detail.loading) {
+    return (
+      <div className="p-4 text-slate-300 text-sm flex items-center gap-2">
+        <span className="animate-spin inline-block"><RefreshCw className="h-4 w-4" /></span>
+        Cargando conductores de {companyName}...
+      </div>
+    );
+  }
+  if (detail.error) {
+    return (
+      <div className="p-4 text-red-400 text-sm flex items-center gap-3">
+        <span>Error al cargar conductores: {detail.error}</span>
+        <button onClick={onReload} className="text-white bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded-lg text-xs">
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+  const data = detail.data!;
+  const drivers = data.drivers ?? [];
+
+  return (
+    <div className="p-3 space-y-3">
+      {/* Totales empresa */}
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="text-slate-300">Empresa:</span>
+        <span className="text-white font-semibold">{companyName}</span>
+        <span className="ml-4 text-slate-400">Deuda total:</span>
+        <span className="text-white">{formatCurrency(data.totals.totalDebt)}</span>
+        <span className="ml-4 text-slate-400">Pendientes:</span>
+        <span className="text-yellow-400">{data.totals.pending}</span>
+        <span className="ml-4 text-slate-400">Vencidos:</span>
+        <span className="text-red-400">{data.totals.overdue}</span>
+      </div>
+
+      {/* Tabla de conductores */}
+      <div className="rounded-lg border border-slate-700 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px]">
+            <thead className="bg-slate-700 text-slate-200">
+              <tr className="text-left text-sm">
+                <th className="py-2 px-3">Conductor</th>
+                <th className="py-2 px-3">DNI</th>
+                <th className="py-2 px-3">Placa</th>
+                <th className="py-2 px-3 text-right">Deuda</th>
+                <th className="py-2 px-3">Créditos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drivers.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-3 px-3 text-slate-400 text-sm">
+                    No hay conductores con créditos.
+                  </td>
+                </tr>
+              )}
+              {drivers.map((d, idx) => (
+                <tr key={d.driver?.driver_id ?? `none-${idx}`} className="border-t border-slate-800 align-top">
+                  <td className="py-2 px-3 text-white">
+                    {d.driver?.full_name || <span className="text-slate-400 italic">Sin conductor</span>}
+                  </td>
+                  <td className="py-2 px-3 text-slate-300">{d.driver?.dni || '—'}</td>
+                  <td className="py-2 px-3 text-slate-300">{d.driver?.plate || '—'}</td>
+                  <td className="py-2 px-3 text-right text-slate-200">{formatCurrency(d.totalDebt || 0)}</td>
+                  <td className="py-2 px-3">
+                    {/* créditos del driver */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[680px] bg-slate-900/30 rounded">
+                        <thead>
+                          <tr className="text-xs uppercase text-slate-400">
+                            <th className="text-left py-2 px-2">#</th>
+                            <th className="text-right py-2 px-2">Monto</th>
+                            <th className="text-right py-2 px-2">Pagado</th>
+                            <th className="text-right py-2 px-2">Saldo</th>
+                            <th className="text-left py-2 px-2">Estado</th>
+                            <th className="text-left py-2 px-2">Vence</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {d.credits.map((cr) => {
+                            const bal = Math.max(0, num(cr.credit_amount) - num(cr.amount_paid));
+                            const eff = isPaid(cr) ? 'paid' : isOverdue(cr) ? 'overdue' : 'pending';
+                            return (
+                              <tr key={cr.credit_id} className="border-t border-slate-800">
+                                <td className="py-2 px-2 text-slate-200">#{cr.credit_id}</td>
+                                <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.credit_amount))}</td>
+                                <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.amount_paid))}</td>
+                                <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(bal)}</td>
+                                <td className="py-2 px-2">
+                                  <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${getStatusColor(eff)}`}>
+                                    {eff === 'paid' ? 'Pagado' : eff === 'overdue' ? 'Vencido' : 'Pendiente'}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2 text-slate-300 whitespace-nowrap">
+                                  {(cr as any).due_date ? formatDate((cr as any).due_date) : '-'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {d.credits.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="py-2 px-2 text-slate-400 text-xs">Sin créditos</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Nota: el botón Pagar se mantiene arriba (fila resumen) y usa el modal
+            que ya soporta pagar todos los créditos de la empresa (incluye conductores). */}
+      </div>
+    </div>
+  );
+}
