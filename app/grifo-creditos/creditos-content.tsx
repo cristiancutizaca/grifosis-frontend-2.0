@@ -77,8 +77,13 @@ const GrifoCreditManagement: React.FC = () => {
 
   const [clientes, setClientes] = useState<Client[]>([]);
 
+  // Modal de pago por CLIENTE/EMPRESA (global)
   const [payModalOpen, setPayModalOpen] = useState(false);
   const [payModalClientId, setPayModalClientId] = useState<number | null>(null);
+
+  // Modal de pago por CONDUCTOR (nuevo)
+  const [payDriverModalOpen, setPayDriverModalOpen] = useState(false);
+  const [payDriverCtx, setPayDriverCtx] = useState<{ companyId: number; driverId: number; driverName?: string } | null>(null);
 
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [totalDebt, setTotalDebt] = useState(0);
@@ -249,6 +254,12 @@ const GrifoCreditManagement: React.FC = () => {
   // ======== Modal & acciones ========
   const openPayModal = (clientId: number) => { setPayModalClientId(clientId); setPayModalOpen(true); };
   const onPaidRefresh = async () => { await Promise.all([loadCredits(), loadDashboard()]); };
+
+  // NUEVO: abrir modal de PAGO POR CONDUCTOR
+  const openPayDriverModal = (companyId: number, driverId: number, driverName?: string) => {
+    setPayDriverCtx({ companyId, driverId, driverName });
+    setPayDriverModalOpen(true);
+  };
 
   // Expandir / colapsar y, si es empresa, cargar conductores
   const toggleExpand = async (clientId: number) => {
@@ -507,6 +518,7 @@ const GrifoCreditManagement: React.FC = () => {
                               formatCurrency={formatCurrency}
                               formatDate={formatDate}
                               getStatusColor={getStatusColor}
+                              onPayDriver={(driverId, driverName) => openPayDriverModal(g.client_id, driverId, driverName)} // 👈 NUEVO
                             />
                           ) : (
                             <ClientCreditsBlock
@@ -565,12 +577,27 @@ const GrifoCreditManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal de pago */}
+      {/* Modal de pago (cliente/empresa) */}
       <CreditPayModal
         open={payModalOpen}
         onClose={() => setPayModalOpen(false)}
         defaultClientId={payModalClientId ?? undefined}
         onPaid={async () => { await onPaidRefresh(); }}
+      />
+
+      {/* Modal de pago por CONDUCTOR */}
+      <CreditPayModal
+        open={payDriverModalOpen}
+        onClose={() => setPayDriverModalOpen(false)}
+        defaultClientId={payDriverCtx?.companyId ?? undefined}
+        defaultDriverId={payDriverCtx?.driverId ?? undefined}     // 👈 NUEVO
+        contextLabel={
+          payDriverCtx?.driverName ? `Conductor: ${payDriverCtx.driverName}` : undefined
+        }                                                          // 👈 opcional
+        onPaid={async () => {
+          await onPaidRefresh();
+          if (payDriverCtx?.companyId) await refetchCompany(payDriverCtx.companyId);
+        }}
       />
     </div>
   );
@@ -662,6 +689,7 @@ function CompanyDriversBlock({
   formatCurrency,
   formatDate,
   getStatusColor,
+  onPayDriver, // 👈 NUEVO
 }: {
   companyId: number;
   companyName: string;
@@ -670,6 +698,7 @@ function CompanyDriversBlock({
   formatCurrency: (n: number) => string;
   formatDate: (s: string) => string;
   getStatusColor: (s: string) => string;
+  onPayDriver?: (driverId: number, driverName?: string) => void;  // 👈 NUEVO
 }) {
   if (!detail || detail.loading) {
     return (
@@ -709,7 +738,7 @@ function CompanyDriversBlock({
       {/* Tabla de conductores */}
       <div className="rounded-lg border border-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px]">
+          <table className="w-full min-w-[1080px]">
             <thead className="bg-slate-700 text-slate-200">
               <tr className="text-left text-sm">
                 <th className="py-2 px-3">Conductor</th>
@@ -717,76 +746,96 @@ function CompanyDriversBlock({
                 <th className="py-2 px-3">Placa</th>
                 <th className="py-2 px-3 text-right">Deuda</th>
                 <th className="py-2 px-3">Créditos</th>
+                <th className="py-2 px-3">Acciones</th> {/* 👈 NUEVO */}
               </tr>
             </thead>
             <tbody>
               {drivers.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-3 px-3 text-slate-400 text-sm">
+                  <td colSpan={6} className="py-3 px-3 text-slate-400 text-sm">
                     No hay conductores con créditos.
                   </td>
                 </tr>
               )}
-              {drivers.map((d, idx) => (
-                <tr key={d.driver?.driver_id ?? `none-${idx}`} className="border-t border-slate-800 align-top">
-                  <td className="py-2 px-3 text-white">
-                    {d.driver?.full_name || <span className="text-slate-400 italic">Sin conductor</span>}
-                  </td>
-                  <td className="py-2 px-3 text-slate-300">{d.driver?.dni || '—'}</td>
-                  <td className="py-2 px-3 text-slate-300">{d.driver?.plate || '—'}</td>
-                  <td className="py-2 px-3 text-right text-slate-200">{formatCurrency(d.totalDebt || 0)}</td>
-                  <td className="py-2 px-3">
-                    {/* créditos del driver */}
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[680px] bg-slate-900/30 rounded">
-                        <thead>
-                          <tr className="text-xs uppercase text-slate-400">
-                            <th className="text-left py-2 px-2">#</th>
-                            <th className="text-right py-2 px-2">Monto</th>
-                            <th className="text-right py-2 px-2">Pagado</th>
-                            <th className="text-right py-2 px-2">Saldo</th>
-                            <th className="text-left py-2 px-2">Estado</th>
-                            <th className="text-left py-2 px-2">Vence</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {d.credits.map((cr) => {
-                            const bal = Math.max(0, num(cr.credit_amount) - num(cr.amount_paid));
-                            const eff = isPaid(cr) ? 'paid' : isOverdue(cr) ? 'overdue' : 'pending';
-                            return (
-                              <tr key={cr.credit_id} className="border-t border-slate-800">
-                                <td className="py-2 px-2 text-slate-200">#{cr.credit_id}</td>
-                                <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.credit_amount))}</td>
-                                <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.amount_paid))}</td>
-                                <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(bal)}</td>
-                                <td className="py-2 px-2">
-                                  <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${getStatusColor(eff)}`}>
-                                    {eff === 'paid' ? 'Pagado' : eff === 'overdue' ? 'Vencido' : 'Pendiente'}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-2 text-slate-300 whitespace-nowrap">
-                                  {(cr as any).due_date ? formatDate((cr as any).due_date) : '-'}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                          {d.credits.length === 0 && (
-                            <tr>
-                              <td colSpan={6} className="py-2 px-2 text-slate-400 text-xs">Sin créditos</td>
+              {drivers.map((d, idx) => {
+                const totalDebt = d.totalDebt || 0;
+                const driverId = d.driver?.driver_id;
+                const driverName = d.driver?.full_name;
+
+                return (
+                  <tr key={driverId ?? `none-${idx}`} className="border-t border-slate-800 align-top">
+                    <td className="py-2 px-3 text-white">
+                      {driverName || <span className="text-slate-400 italic">Sin conductor</span>}
+                    </td>
+                    <td className="py-2 px-3 text-slate-300">{d.driver?.dni || '—'}</td>
+                    <td className="py-2 px-3 text-slate-300">{d.driver?.plate || '—'}</td>
+                    <td className="py-2 px-3 text-right text-slate-200">{formatCurrency(totalDebt)}</td>
+                    <td className="py-2 px-3">
+                      {/* créditos del driver */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[680px] bg-slate-900/30 rounded">
+                          <thead>
+                            <tr className="text-xs uppercase text-slate-400">
+                              <th className="text-left py-2 px-2">#</th>
+                              <th className="text-right py-2 px-2">Monto</th>
+                              <th className="text-right py-2 px-2">Pagado</th>
+                              <th className="text-right py-2 px-2">Saldo</th>
+                              <th className="text-left py-2 px-2">Estado</th>
+                              <th className="text-left py-2 px-2">Vence</th>
                             </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                          </thead>
+                          <tbody>
+                            {d.credits.map((cr) => {
+                              const bal = Math.max(0, num(cr.credit_amount) - num(cr.amount_paid));
+                              const eff = isPaid(cr) ? 'paid' : isOverdue(cr) ? 'overdue' : 'pending';
+                              return (
+                                <tr key={cr.credit_id} className="border-t border-slate-800">
+                                  <td className="py-2 px-2 text-slate-200">#{cr.credit_id}</td>
+                                  <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.credit_amount))}</td>
+                                  <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(num(cr.amount_paid))}</td>
+                                  <td className="py-2 px-2 text-slate-300 text-right">{formatCurrency(bal)}</td>
+                                  <td className="py-2 px-2">
+                                    <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${getStatusColor(eff)}`}>
+                                      {eff === 'paid' ? 'Pagado' : eff === 'overdue' ? 'Vencido' : 'Pendiente'}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-2 text-slate-300 whitespace-nowrap">
+                                    {(cr as any).due_date ? formatDate((cr as any).due_date) : '-'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {d.credits.length === 0 && (
+                              <tr>
+                                <td colSpan={6} className="py-2 px-2 text-slate-400 text-xs">Sin créditos</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </td>
+                    <td className="py-2 px-3">
+                      <button
+                        disabled={!driverId || totalDebt <= 0}
+                        onClick={() => driverId && onPayDriver?.(driverId, driverName)}
+                        className={`text-sm px-3 py-1.5 rounded-lg ${
+                          driverId && totalDebt > 0
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                        }`}
+                        title={driverId ? (totalDebt > 0 ? 'Pagar créditos de este conductor' : 'Sin saldo') : 'Conductor no definido'}
+                      >
+                        Pagar
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
 
-        {/* Nota: el botón Pagar se mantiene arriba (fila resumen) y usa el modal
-            que ya soporta pagar todos los créditos de la empresa (incluye conductores). */}
+        {/* Nota: el botón Pagar general se mantiene arriba (fila resumen) */}
       </div>
     </div>
   );

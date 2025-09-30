@@ -10,7 +10,7 @@ export interface Credit {
   credit_id: number;
   client_id: number;
   sale_id?: number | null;
-  driver_id?: number | null;            // 👈 NUEVO
+  driver_id?: number | null;            // 👈 conductor asociado
   credit_amount: number;
   amount_paid: number;
   due_date: string;                     // ISO
@@ -29,7 +29,7 @@ export interface Credit {
     sale_id: number;
     total_amount?: number;
   };
-  // 👇 NUEVO: info del conductor (si se cargó con relaciones)
+  // info del conductor (si se cargó con relaciones)
   driver?: {
     driver_id: number;
     company_id: number;
@@ -69,7 +69,7 @@ export interface BulkPaymentItem {
   amount: number;
 }
 export interface BulkPaymentsBody {
-  items: BulkPaymentItem[];         // 👈 importante: 'items'
+  items: BulkPaymentItem[];         // importante: 'items'
   payment_method_id?: number;
   user_id?: number;
   notes?: string;                   // referencia/observaciones
@@ -86,12 +86,17 @@ export interface PaymentRow {
   payment_type?: string | null;
   status: string;
 }
+// src/services/creditService.ts
+
 export interface BulkPaymentsResponse {
   updated: Credit[];
+  /** alias legacy para algunos backends */
+  updatedCredits?: Credit[];
   payments: PaymentRow[];
   count: number;
   totalAmount: number;
 }
+
 
 // ====== Auto allocate (pago automático por monto - por cliente) ======
 export interface AutoAllocateBody {
@@ -101,6 +106,8 @@ export interface AutoAllocateBody {
   notes?: string;
   /** 'due' (default) | 'created' */
   order?: 'due' | 'created';
+  /** 👇 NUEVO: limitar reparto a un conductor del cliente */
+  driver_id?: number;
 }
 export interface AutoAllocateResponse {
   ok: boolean;
@@ -111,7 +118,7 @@ export interface AutoAllocateResponse {
   updatedCredits: Credit[];
 }
 
-/* ====== NUEVO: créditos por empresa agrupados por conductor ====== */
+/* ====== créditos por empresa agrupados por conductor ====== */
 export interface CompanyCreditsGroup {
   company_id: number;
   company_name: string;
@@ -129,7 +136,7 @@ export interface CompanyCreditsGroup {
   }>;
 }
 
-/* ====== NUEVO: autopago por empresa ====== */
+/* ====== autopago por empresa / conductor ====== */
 export interface AutoPayCompanyBody {
   total_amount: number;
   payment_method_id?: number;
@@ -142,6 +149,16 @@ export interface AutoPayCompanyResponse {
   leftover: number;
   result: BulkPaymentsResponse;
 }
+
+// Para el endpoint por conductor usamos el mismo response shape
+export interface AutoPayDriverBody {
+  total_amount: number;
+  payment_method_id?: number;
+  user_id?: number;
+  notes?: string;
+  order?: 'due' | 'created';
+}
+export type AutoPayDriverResponse = AutoPayCompanyResponse;
 
 export interface CreditStats {
   totalCredits: number;
@@ -160,7 +177,7 @@ class CreditService {
 
   /**
    * Obtener todos los créditos con filtros opcionales (sin caché).
-   * Ej: { status: 'pending' }, { overdue: true }, etc.
+   * Ej: { status: 'pending' }, { overdue: true }, { client_id, driver_id }, etc.
    */
   async getAllCredits(filters?: Record<string, any>): Promise<Credit[]> {
     // include=client (legacy) — el backend lo ignora, pero se mantiene por compat
@@ -230,6 +247,7 @@ class CreditService {
 
   /**
    * ✅ Pago automático por monto (cliente)
+   * - Si pasas driver_id, limita el reparto a ese conductor del cliente.
    */
   async autoAllocatePayment(
     clientId: number,
@@ -241,7 +259,19 @@ class CreditService {
     );
   }
 
-  /* ====== NUEVO: créditos por EMPRESA (agrupados por conductor) ====== */
+  /**
+   * ✅ Conveniencia: autopago SOLO para un conductor de un cliente.
+   * Llama al mismo endpoint del cliente, añadiendo driver_id en el body.
+   */
+  async autoAllocatePaymentForDriver(
+    clientId: number,
+    driverId: number,
+    body: Omit<AutoAllocateBody, 'driver_id'>
+  ): Promise<AutoAllocateResponse> {
+    return this.autoAllocatePayment(clientId, { ...body, driver_id: driverId });
+  }
+
+  /* ====== créditos por EMPRESA (agrupados por conductor) ====== */
   async getCompanyCreditsGrouped(
     companyId: number,
     opts?: { onlyPending?: boolean }
@@ -253,13 +283,25 @@ class CreditService {
     return apiService.get<CompanyCreditsGroup>(url, { cache: 'no-store' } as RequestInit);
   }
 
-  /* ====== NUEVO: autopago por EMPRESA ====== */
+  /* ====== autopago por EMPRESA (reparte por due_date; opcional filtrar driver_ids) ====== */
   async autoPayCompany(
     companyId: number,
     body: AutoPayCompanyBody
   ): Promise<AutoPayCompanyResponse> {
     return apiService.post<AutoPayCompanyResponse>(
       `${this.endpoint}/company/${companyId}/payments/auto`,
+      body
+    );
+  }
+
+  /* ====== NUEVO: autopago DIRECTO por CONDUCTOR (endpoint específico) ====== */
+  async autoPayDriver(
+    companyId: number,
+    driverId: number,
+    body: AutoPayDriverBody
+  ): Promise<AutoPayDriverResponse> {
+    return apiService.post<AutoPayDriverResponse>(
+      `${this.endpoint}/company/${companyId}/drivers/${driverId}/payments/auto`,
       body
     );
   }
