@@ -57,10 +57,10 @@ export interface UserWithEmployeeResponse extends User {
 class UserService {
   private readonly endpoint = '/users';
 
-  // Obtener todos los usuarios
+  // Obtener todos los usuarios (incluye inactivos)
   async getAll(): Promise<User[]> {
     try {
-      return await ApiService.get<User[]>(this.endpoint);
+      return await this.list('all');
     } catch (error) {
       console.error('Error al obtener usuarios:', error);
       throw error;
@@ -70,12 +70,13 @@ class UserService {
   // Obtener usuarios activos
   async getActiveUsers(): Promise<User[]> {
     try {
-      return await ApiService.get<User[]>(`${this.endpoint}?active=true`);
+      return await this.list('active'); // <— antes usabas ?active=true
     } catch (error) {
       console.error('Error al obtener usuarios activos:', error);
       throw error;
     }
   }
+
 
   // Obtener usuarios por rol
   async getUsersByRole(role: string): Promise<User[]> {
@@ -143,7 +144,7 @@ class UserService {
         employee: createdEmployee,
       };
 
-      
+
     } catch (error) {
       console.error('Error al crear usuario y empleado:', error);
       // Si falla la creación del usuario pero el empleado ya se creó,
@@ -163,9 +164,12 @@ class UserService {
   }
 
   // Eliminar usuario
-  async delete(id: number): Promise<void> {
+  // Eliminar usuario (soft por defecto)
+  // delete(id) -> soft; delete(id, true) -> hard
+  async delete(id: number, hard = false): Promise<void> {
     try {
-      await ApiService.delete(`${this.endpoint}/${id}`);
+      const q = hard ? '?hard=true' : '';
+      await ApiService.delete(`${this.endpoint}/${id}${q}`);
     } catch (error) {
       console.error('Error al eliminar usuario:', error);
       throw error;
@@ -255,6 +259,18 @@ class UserService {
       throw error;
     }
   }
+
+  // Nuevo: listar con filtro de estado
+  async list(status: 'active' | 'all' = 'active'): Promise<User[]> {
+    try {
+      return await ApiService.get<User[]>(`${this.endpoint}?status=${status}`);
+    } catch (error) {
+      console.error('Error al obtener usuarios:', error);
+      throw error;
+    }
+  }
+
+
 
   // MÉTODO CORREGIDO: Obtener todos los usuarios con información de empleados
   async getAllWithEmployees(): Promise<UserWithEmployeeResponse[]> {

@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useMemo, useState, useCallback, Suspense } from 'react';
+import React, { useMemo, useState, useCallback, Suspense, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { FileText, Users, TrendingUp, AlertCircle } from 'lucide-react';
-import { useRouter } from 'next/navigation'; // Importa el router
+import { useRouter } from 'next/navigation';
 
 import UserSelector from '../../src/components/UserSelector';
 
@@ -28,7 +28,7 @@ type DateRange = { startDate: string; endDate: string };
 const todayISO = new Date().toISOString().split('T')[0];
 
 const ReportsContent: React.FC = () => {
-  const router = useRouter(); // Inicializa el router
+  const router = useRouter();
 
   // SINGLE
   const [selectedUser, setSelectedUser] = useState<string>('');
@@ -36,7 +36,7 @@ const ReportsContent: React.FC = () => {
 
   // MULTI (controlado)
   const [multiMode, setMultiMode] = useState<boolean>(false);
-  const [selectedUsersCsv, setSelectedUsersCsv] = useState<string>(''); // "12,15,20"
+  const [selectedUsersCsv, setSelectedUsersCsv] = useState<string>('');
 
   // COMÚN
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: todayISO, endDate: todayISO });
@@ -66,10 +66,12 @@ const ReportsContent: React.FC = () => {
     setShowReport(false);
   }, []);
 
+  // ✅ PATCH 1: Validación mejorada para el modo multiusuario.
   const handleGenerateReport = useCallback(() => {
     if (rangeInvalid) return;
     if (multiMode) {
-      if (!selectedUsersCsv) return;
+      const hasAtLeastTwo = selectedUsersCsv.split(',').map(s => s.trim()).filter(Boolean).length >= 2;
+      if (!hasAtLeastTwo) return; // Forzar al menos 2 usuarios en modo multi.
       setShowReport(true);
     } else {
       if (!selectedUser) return;
@@ -85,6 +87,17 @@ const ReportsContent: React.FC = () => {
       }`,
     [multiMode, selectedUsersCsv, selectedUser, dateRange.startDate, dateRange.endDate, onlyCompleted]
   );
+
+  // ✅ PATCH 3: (Opcional UX) Scroll hacia arriba al mostrar el reporte.
+  useEffect(() => {
+    if (showReport) {
+      // Pequeño delay para dar tiempo al renderizado del componente dinámico.
+      setTimeout(() => {
+        window.scrollTo({ top: 300, behavior: 'smooth' }); // Ajusta el 'top' según tu layout
+      }, 100);
+    }
+  }, [showReport, reportKey]); // Se activa también cuando la key cambia.
+
 
   // Texto guía según modo
   const hasSelection = multiMode ? !!selectedUsersCsv : !!selectedUser;
@@ -104,11 +117,7 @@ const ReportsContent: React.FC = () => {
             </p>
           </div>
 
-          {/* ====== SECCIÓN MODIFICADA AQUÍ ====== */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-            
-
-            {/* ====== TU NUEVO BOTÓN AÑADIDO AQUÍ ====== */}
             <button
               onClick={() => router.push('/grifo-reportes/clients')}
               className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 flex-1 text-left hover:bg-blue-500/20 transition-colors"
@@ -119,9 +128,7 @@ const ReportsContent: React.FC = () => {
               </div>
               <p className="text-sm text-slate-300">Análisis detallado por cliente</p>
             </button>
-            {/* ========================================= */}
           </div>
-          {/* ========================================= */}
         </div>
       </header>
 
@@ -142,8 +149,11 @@ const ReportsContent: React.FC = () => {
             <TrendingUp className="h-5 w-5 md:h-6 md:w-6 text-green-400 mr-3" />
             <h3 className="text-base md:text-lg font-semibold text-white">Análisis Detallado</h3>
           </div>
+          {/* ✅ PATCH 2: Texto dinámico según el modo. */}
           <p className="text-slate-300 text-sm">
-            Visualiza ventas, créditos y movimientos de inventario del período.
+            {multiMode
+              ? 'Visualiza ventas agregadas por múltiples usuarios (descarga Excel/PDF).'
+              : 'Visualiza ventas, créditos y movimientos de inventario del período.'}
           </p>
         </div>
 
@@ -163,7 +173,7 @@ const ReportsContent: React.FC = () => {
           selectedUser={selectedUser}
           onUserChange={(id) => {
             handleUserChange(id);
-            setSelectedUsersCsv(''); // si cambias a single, limpia CSV mostrado
+            setSelectedUsersCsv('');
           }}
           onUserNameChange={handleUserNameChange}
           // RANGO
@@ -177,7 +187,7 @@ const ReportsContent: React.FC = () => {
             setOnlyCompleted(v);
             setShowReport(false);
           }}
-          // MULTI controlado 👇
+          // MULTI controlado
           multiMode={multiMode}
           onMultiModeChange={(v) => {
             setMultiMode(v);
@@ -201,7 +211,7 @@ const ReportsContent: React.FC = () => {
                 Instrucciones
               </h3>
               <div className="text-slate-300 space-y-1.5 md:space-y-2 text-sm">
-                <p>1. Selecciona {multiMode ? 'varios usuarios' : 'un usuario'}.</p>
+                <p>1. Selecciona {multiMode ? 'varios usuarios (al menos 2)' : 'un usuario'}.</p>
                 <p>2. Define el rango de fechas.</p>
                 <p>3. Haz clic en “Generar Reporte”.</p>
               </div>

@@ -326,6 +326,19 @@ class CashBoxService {
     return days[0] ?? { dateKey: date, events: [] };
   }
 
+  /* ========= NUEVO: lecturas del **día** (independiente de turnos) =========
+     GET /api/cash-box/day-readings?date=YYYY-MM-DD
+     Devuelve un array de lecturas con al menos: nozzle_id, initial_reading, final_reading, created_at
+  */
+  async dayReadings(dayYmd: string): Promise<any[]> {
+    const url = `${this.basePoint}/day-readings?date=${encodeURIComponent(dayYmd)}`;
+    const res: any = await ApiService.get<any>(url);
+    if (Array.isArray(res)) return res;
+    if (Array.isArray(res?.data)) return res.data;
+    if (Array.isArray(res?.rows)) return res.rows;
+    return [];
+  }
+
   /* ========= NUEVO: lecturas de medidores por turno ========= */
   // GET /api/cash-box/meters?date=YYYY-MM-DD&shift=Leon
   async getShiftMeters(params: { date: string; shift: ShiftKey }): Promise<MeterReadingRow[]> {
@@ -349,6 +362,44 @@ class CashBoxService {
       }
     }
     return [];
+  }
+
+  /* ========= NUEVO (AGREGADO): endpoint nuevo de medidores =========
+     1) Intenta /cash-box/:date/:shift/meters-fast
+     2) Si no existe aún, hace fallback a /cash-box/:date/:shift/meters
+  */
+  async metersForShiftFast(
+    date: string,
+    shift: ShiftKey | string,
+    fallbackNowIfOpen: '0' | '1' = '1'
+  ): Promise<any> {
+    const d = encodeURIComponent(date);
+    const s = encodeURIComponent(String(normalizeShift(shift)));
+
+    // 1) nuevo
+    const fastUrl = `${this.basePoint}/${d}/${s}/meters-fast?fallbackNowIfOpen=${fallbackNowIfOpen}`;
+    try {
+      return await ApiService.get<any>(fastUrl);
+    } catch {
+      // 2) fallback al existente
+      const legacyUrl = `${this.basePoint}/${d}/${s}/meters?fallbackNowIfOpen=${fallbackNowIfOpen}`;
+      return await ApiService.get<any>(legacyUrl);
+    }
+  }
+
+  /* ========= MÉTODO EXISTENTE (lo dejo igual) =========
+     Si ya tenías código que lo usa, seguirá funcionando.
+  */
+  async metersForShift(
+    date: string,
+    shift: ShiftKey | string,
+    fallbackNowIfOpen: '0' | '1' = '1'
+  ): Promise<any> {
+    const d = encodeURIComponent(date);
+    const s = encodeURIComponent(String(normalizeShift(shift)));
+    const url = `${this.basePoint}/${d}/${s}/meters?fallbackNowIfOpen=${fallbackNowIfOpen}`;
+    const res = await ApiService.get<any>(url);
+    return res;
   }
 }
 

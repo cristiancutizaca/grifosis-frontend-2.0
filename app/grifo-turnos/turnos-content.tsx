@@ -228,12 +228,13 @@ const TurnosContent: React.FC = () => {
       const [salesRaw, allNozzlesRaw, pmCatalogRaw] = await Promise.all([
         saleService.getRecentSales(RECENT_LIMIT),
         nozzleService.getAllNozzles(),
-        paymentMethodService.getAll().catch(() => []),
+        paymentMethodService.getActive().catch(() => []),  // ✅ SOLO ACTIVOS
       ]);
 
       const sales: any[] = asArray<any>(salesRaw);
       const allNozzles: any[] = asArray<any>(allNozzlesRaw);
-      const cat: any[] = asArray<any>(pmCatalogRaw) || [];
+      const catAll: any[] = asArray<any>(pmCatalogRaw) || [];
+      const cat = catAll.filter((m: any) => (m?.is_active ?? m?.enabled ?? m?.active ?? true) === true);
       setPmCatalog(cat);
 
       const pmMap = new Map<number, string>();
@@ -1092,7 +1093,9 @@ return (
 
           {/* Desglose por método */}
           <div className="mt-4">
-            <div className="mb-2 text-[10px] sm:text-[11px] uppercase tracking-wide text-slate-400">Desglose por método</div>
+            <div className="mb-2 text-[10px] sm:text-[11px] uppercase tracking-wide text-slate-400">
+              Desglose por método
+            </div>
 
             {pmCatalog?.length > 0 ? (
               <div className="grid grid-cols-1 gap-2 xs:grid-cols-2">
@@ -1111,28 +1114,12 @@ return (
                 })}
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-2 xs:grid-cols-2">
-                {(['Efectivo', 'Tarjeta', 'Yape/Plin', 'Crédito'] as const).map((k) => {
-                  const sum =
-                    k === 'Efectivo'
-                      ? totalsByMethod.efectivo
-                      : k === 'Tarjeta'
-                      ? totalsByMethod.tarjeta
-                      : k === 'Yape/Plin'
-                      ? totalsByMethod.yapeplin
-                      : totalsByMethod.credito;
-                  return (
-                    <div key={k} className="flex items-center justify-between rounded-lg border border-white/10 bg-slate-900/50 p-3">
-                      <span className="text-sm text-slate-300">{k}</span>
-                      <span className="text-sm font-semibold text-white">S/ {sum.toFixed(2)}</span>
-                    </div>
-                  );
-                })}
+              <div className="rounded-lg border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-300">
+                No hay métodos de pago activos configurados.
               </div>
             )}
           </div>
         </div>
-
         {/* Derecha: Resumen */}
         <aside className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-4 sm:p-6">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

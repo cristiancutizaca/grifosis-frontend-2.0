@@ -1,3 +1,4 @@
+'use client'
 import React from "react";
 import useDashboard, { getBackupLabel } from "./hooks/use-dashboard"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
