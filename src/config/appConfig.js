@@ -4,7 +4,7 @@ export const APP_CONFIG = {
   mode: 'online', // Cambiar a 'online' para habilitar el backend
   
   // URL del backend (solo se usa en modo 'online')
-  backendUrl: 'http://localhost:8000/api',
+  backendUrl: 'https://grifosisneo.duckdns.org/api',
   
   // Configuración de autenticación
   auth: {
