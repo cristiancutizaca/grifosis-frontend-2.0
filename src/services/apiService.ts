@@ -4,7 +4,11 @@
 export class ApiService {
   private baseURL: string;
 
-  constructor(baseURL: string = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api') {
+
+  
+  //constructor(baseURL: string = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api') {
+
+  constructor(baseURL: string = process.env.NEXT_PUBLIC_API_URL || 'https://grifosisneo.duckdns.org/api') {
     this.baseURL = baseURL.replace(/\/+$/, ''); // sin barra final
   }
 

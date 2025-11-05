@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import {
   Home, Users, ShoppingCart, CreditCard, Package, BarChart3, User, Clock,
   Settings, Menu, ChevronLeft, ChevronRight, Fuel
@@ -42,7 +42,6 @@ const MENU_ITEMS = {
     { name: 'Inventario', icon: Package, path: '/grifo-inventario' },
     { name: 'Créditos', icon: CreditCard, path: '/grifo-creditos' },
     { name: 'Turnos', icon: Clock, path: '/grifo-turnos' },
-
   ]
 } as const;
 
@@ -57,18 +56,77 @@ interface LayoutProps {
   currentPage?: string;
 }
 
+// ===== Auto-logout SIN .env =====
+const DEFAULT_IDLE_MINUTES = 1; // cambia si quieres otro default
+const LAST_ACTIVITY_KEY = 'app:last-activity-ms';
+const AUTH_BC = 'auth';
+
+// Permite override en runtime: localStorage.setItem('idle-minutes','1')
+function getIdleMinutes(): number {
+  if (typeof window !== 'undefined') {
+    const raw = (localStorage.getItem('idle-minutes') ?? '').trim();
+    const n = Number.parseInt(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return DEFAULT_IDLE_MINUTES;
+}
+
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const router = useRouter();
   const pathname = usePathname();
 
   // Estado de UI
   const [isDesktop, setIsDesktop] = useState(false);         // >= lg
-  const [drawerOpen, setDrawerOpen] = useState(false);        // sidebar móvil (off-canvas)
+  const [drawerOpen, setDrawerOpen] = useState(false);        // sidebar móvil
   const [collapsed, setCollapsed] = useState(false);          // sidebar desktop mini
 
   // Auth
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Refs para idle
+  const lastActivityRef = useRef<number>(Date.now());
+  const singleShotTimerRef = useRef<number | null>(null);
+  const watchdogIntervalRef = useRef<number | null>(null);
+  const bcRef = useRef<BroadcastChannel | null>(null);
+
+  // Helpers logout
+  const clearAuth = useCallback(() => {
+    try {
+      sessionStorage.clear();           // mata toda la sesión
+      localStorage.removeItem('token'); // por compatibilidad si alguna vez lo usaste
+      localStorage.removeItem('authToken');
+      sessionStorage.removeItem('authToken');
+    } catch {}
+  }, []);
+
+  const broadcastLogout = useCallback(() => {
+    try {
+      const bc = new BroadcastChannel(AUTH_BC);
+      bc.postMessage({ type: 'force-logout' });
+      bc.close();
+    } catch {}
+    // Fallback por storage (navegadores sin BroadcastChannel)
+    try { localStorage.setItem('force-logout-ts', String(Date.now())); } catch {}
+  }, []);
+
+  // Redirección dura a prueba de balas → '/'
+  const hardRedirectLogin = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      try { window.location.href = '/'; return; } catch {}
+      try { window.location.assign('/'); return; } catch {}
+      setTimeout(() => {
+        try { window.history.pushState(null, '', '/'); } catch {}
+        window.location.reload();
+      }, 60);
+    }
+  }, []);
+
+  const logoutEverywhere = useCallback(() => {
+    clearAuth();
+    broadcastLogout();
+    hardRedirectLogin();
+  }, [broadcastLogout, clearAuth, hardRedirectLogin]);
 
   // Detectar breakpoint lg (>=1024px)
   useEffect(() => {
@@ -76,12 +134,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     const handle = (e: MediaQueryListEvent | MediaQueryList) => {
       const isDesk = 'matches' in e ? e.matches : (e as MediaQueryList).matches;
       setIsDesktop(isDesk);
-      // al pasar a desktop: cerramos drawer y expandimos sidebar
-      if (isDesk) {
-        setDrawerOpen(false);
-      } else {
-        setCollapsed(false);
-      }
+      if (isDesk) setDrawerOpen(false);
+      else setCollapsed(false);
     };
     handle(mql); // set inicial
     mql.addEventListener('change', handle);
@@ -89,34 +143,91 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, []);
 
   // Cerrar drawer móvil al navegar
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [pathname]);
+  useEffect(() => { setDrawerOpen(false); }, [pathname]);
 
-  // Auth
+  // Auth (revisa token y obtiene rol)
   useEffect(() => {
     const checkAuth = async () => {
       try {
         const token = typeof window !== 'undefined' ? sessionStorage.getItem('token') : null;
-        if (!token) {
-          router.push('/');
-          return;
-        }
+        if (!token) { router.push('/'); return; }
         let role = 'seller';
         const { jwtDecode } = await import('jwt-decode');
         const decoded: any = jwtDecode(token);
         role = decoded.role || decoded.rol || 'seller';
-
         setUserRole(role);
         setIsLoading(false);
       } catch (error) {
         console.error('Error al verificar autenticación:', error);
         sessionStorage.removeItem('token');
-        router.push('/login');
+        router.push('/');
       }
     };
     checkAuth();
   }, [router]);
+
+  // ==== Auto-logout por inactividad ====
+  useEffect(() => {
+    if (isLoading || !userRole) return; // solo cuando ya estás dentro
+
+    const minutes = getIdleMinutes();
+    const timeoutMs = Math.max(1, minutes) * 60 * 1000;
+
+    const markActivity = () => {
+      lastActivityRef.current = Date.now();
+      try { localStorage.setItem(LAST_ACTIVITY_KEY, String(lastActivityRef.current)); } catch {}
+      // reinicia temporizador de un solo disparo
+      if (singleShotTimerRef.current) window.clearTimeout(singleShotTimerRef.current);
+      singleShotTimerRef.current = window.setTimeout(() => {
+        const now = Date.now();
+        if (now - lastActivityRef.current >= timeoutMs) {
+          logoutEverywhere();
+        }
+      }, timeoutMs) as unknown as number;
+    };
+
+    // inicial
+    markActivity();
+
+    // eventos de actividad
+    const evs = ['mousemove','mousedown','keydown','scroll','touchstart','pointerdown','wheel'];
+    evs.forEach(ev => window.addEventListener(ev, markActivity, { passive: true }));
+
+    // watchdog (por si algo limpia el timeout)
+    watchdogIntervalRef.current = window.setInterval(() => {
+      const now = Date.now();
+      if (now - lastActivityRef.current >= timeoutMs) {
+        logoutEverywhere();
+      }
+    }, 15_000) as unknown as number;
+
+    // sync entre pestañas por storage y broadcast
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === LAST_ACTIVITY_KEY && e.newValue) {
+        const v = Number(e.newValue);
+        if (!Number.isNaN(v)) lastActivityRef.current = v;
+      }
+      if (e.key === 'force-logout-ts' && e.newValue) {
+        logoutEverywhere();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    try {
+      bcRef.current = new BroadcastChannel(AUTH_BC);
+      bcRef.current.onmessage = (msg) => {
+        if (msg?.data?.type === 'force-logout') logoutEverywhere();
+      };
+    } catch {}
+
+    return () => {
+      evs.forEach(ev => window.removeEventListener(ev, markActivity));
+      window.removeEventListener('storage', onStorage);
+      if (singleShotTimerRef.current) window.clearTimeout(singleShotTimerRef.current);
+      if (watchdogIntervalRef.current) window.clearInterval(watchdogIntervalRef.current);
+      try { bcRef.current?.close(); } catch {}
+    };
+  }, [isLoading, userRole, logoutEverywhere]);
 
   const navItems: NavItem[] = useMemo(
     () => (MENU_ITEMS as any)[userRole as keyof typeof MENU_ITEMS] || (MENU_ITEMS as any)['seller'],
@@ -133,16 +244,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   };
 
   const handleLogout = () => {
-    sessionStorage.removeItem('token');
-    router.push('/');
+    clearAuth();
+    broadcastLogout();
+    hardRedirectLogin();
   };
 
   const toggleGlobalSidebar = () => {
-    if (isDesktop) setCollapsed((v) => !v); // en desktop, colapsa/expande
-    else setDrawerOpen((v) => !v);          // en móvil, abre/cierra drawer
+    if (isDesktop) setCollapsed((v) => !v);
+    else setDrawerOpen((v) => !v);
   };
 
-  // Cargando / sin rol
+  // Cargando / sin rol (solo para rutas protegidas)
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-900 text-white">
@@ -178,7 +290,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
     <div className="flex min-h-screen bg-slate-900 text-white">
       {/* ---------- Drawer móvil (off-canvas) ---------- */}
-      {/* Overlay */}
       {!isDesktop && drawerOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/50 lg:hidden"
@@ -186,7 +297,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           aria-hidden="true"
         />
       )}
-      {/* Sidebar móvil */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 w-72 transform bg-slate-800 p-4 transition-transform duration-300 lg:hidden
         ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}

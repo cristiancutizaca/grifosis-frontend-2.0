@@ -4,7 +4,7 @@ export const APP_CONFIG = {
   mode: 'online',
   
   // URL del backend
-  backendUrl: 'http://localhost:8000/api',
+  backendUrl: 'http://64.225.112.18:8000/api',
   
   // Configuración de autenticación
   auth: {
