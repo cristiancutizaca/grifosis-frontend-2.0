@@ -35,3 +35,4 @@ export function logoutEverywhere() {
   broadcastLogout();
   forceRedirectToLogin();
 }
+

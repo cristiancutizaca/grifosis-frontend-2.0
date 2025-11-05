@@ -57,7 +57,7 @@ interface LayoutProps {
 }
 
 // ===== Auto-logout SIN .env =====
-const DEFAULT_IDLE_MINUTES = 1; // cambia si quieres otro default
+const DEFAULT_IDLE_MINUTES = 10; // cambia si quieres otro default
 const LAST_ACTIVITY_KEY = 'app:last-activity-ms';
 const AUTH_BC = 'auth';
 

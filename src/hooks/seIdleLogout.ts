@@ -104,3 +104,4 @@ export function useIdleLogout(opts: Opts = {}) {
     };
   }, [minutes, onlyWhenVisible, timeoutMs]);
 }
+
