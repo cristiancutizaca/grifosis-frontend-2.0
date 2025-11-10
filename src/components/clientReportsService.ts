@@ -139,7 +139,7 @@ export async function downloadClientSummaryExcel(
   group: GroupKind = 'day',
 ): Promise<void> {
   // api.getBaseURL() viene de tu ApiService
-  const base = (api as any).getBaseURL ? (api as any).getBaseURL() : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api');
+  const base = (api as any).getBaseURL ? (api as any).getBaseURL() : (process.env.NEXT_PUBLIC_API_URL || 'https://grifosisneo.duckdns.org/api');
   const qs = new URLSearchParams({ from: fromISO, to: toISO, group }).toString();
   const url = `${base}/reports/clients/${clientId}/sales/summary.xlsx?${qs}`;
 
@@ -160,7 +160,7 @@ export async function downloadClientDetailExcel(
   fromISO: string,
   toISO: string,
 ): Promise<void> {
-  const base = (api as any).getBaseURL ? (api as any).getBaseURL() : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api');
+  const base = (api as any).getBaseURL ? (api as any).getBaseURL() : (process.env.NEXT_PUBLIC_API_URL || 'https://grifosisneo.duckdns.org/api');
   const qs = new URLSearchParams({ from: fromISO, to: toISO }).toString();
   const url = `${base}/reports/clients/${clientId}/sales/detail.xlsx?${qs}`;
 
