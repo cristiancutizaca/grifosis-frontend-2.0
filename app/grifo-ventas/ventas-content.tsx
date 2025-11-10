@@ -490,7 +490,9 @@ const GrifoNewSale: React.FC = () => {
   /** Auto-refresh de ventas, productos, métodos de pago y caja */
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
-    if (!token) return;
+//const token = typeof window !== 'undefined' ? sessionStorage.getItem('token') : null;
+if (!token) { setRecentSales([]); return; }
+
 
     refreshRecentSales();
     fetchProductsGlobal();
