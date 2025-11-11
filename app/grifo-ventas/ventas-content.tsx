@@ -48,6 +48,65 @@ import {
 import { mapClient } from '../../src/utils/clients';
 import Modal from '../../src/components/Modal';
 
+// === Helpers nombre/documento unificado para clientes ===
+type ClientLike = {
+  id?: number;
+  nombre?: string | null | undefined;
+  apellido?: string | null | undefined;
+  full_name?: string | null | undefined;
+  name?: string | null | undefined;
+
+  // empresa
+  client_type?: string | null | undefined;
+  tipo_cliente?: string | null | undefined;
+  company_name?: string | null | undefined;
+  business_name?: string | null | undefined;
+  razon_social?: string | null | undefined;
+
+  // docs
+  documento?: string | null | undefined;
+  document_number?: string | null | undefined;
+  ruc?: string | null | undefined;
+  dni?: string | null | undefined;
+  doc_number?: string | null | undefined;
+};
+
+const getClientType = (c: ClientLike) =>
+  String(c.client_type ?? c.tipo_cliente ?? '').toLowerCase();
+
+export function displayClientName(c: ClientLike): string {
+  const t = getClientType(c);
+  if (t === 'empresa') {
+    return (
+      c.company_name ||
+      c.business_name ||
+      c.razon_social ||
+      c.name ||
+      [c.nombre, c.apellido].filter(Boolean).join(' ') ||
+      'Empresa'
+    );
+  }
+  return (
+    c.full_name ||
+    [c.nombre, c.apellido].filter(Boolean).join(' ') ||
+    c.name ||
+    'Cliente'
+  );
+}
+
+export function displayClientDoc(c: ClientLike): string {
+  return (
+    String(
+      c.documento ??
+      c.document_number ??
+      c.ruc ??
+      c.dni ??
+      c.doc_number ??
+      ''
+    ).trim()
+  );
+}
+
 /* ====== NUEVO: helpers mínimos para encabezado de empresa en PDF ====== */
 type EmpresaHeader = {
   nombre: string;
@@ -82,14 +141,14 @@ async function urlToBase64NoPrefix(url: string): Promise<string | undefined> {
 async function fetchEmpresaFromSettings(): Promise<EmpresaHeader> {
   const s: any = await settingsService.getSettings().catch(() => null);
 
-  const nombre    = s?.grifo_name        ?? s?.company_name    ?? s?.name        ?? s?.nombre ?? 'GRIFO';
-  const ruc       = s?.ruc                ?? s?.company_ruc     ?? s?.ruc_number  ?? undefined;
-  const direccion = s?.direccion          ?? s?.company_address ?? s?.address     ?? undefined;
-  const telefono  = s?.telefono           ?? s?.company_phone   ?? s?.phone      ?? undefined;
-  const email     = s?.email              ?? s?.company_email   ?? undefined;
+  const nombre = s?.grifo_name ?? s?.company_name ?? s?.name ?? s?.nombre ?? 'GRIFO';
+  const ruc = s?.ruc ?? s?.company_ruc ?? s?.ruc_number ?? undefined;
+  const direccion = s?.direccion ?? s?.company_address ?? s?.address ?? undefined;
+  const telefono = s?.telefono ?? s?.company_phone ?? s?.phone ?? undefined;
+  const email = s?.email ?? s?.company_email ?? undefined;
 
   const base64Directo = s?.company_logo_base64 ?? s?.logo_base64 ?? undefined;
-  const logoUrl       = s?.company_logo_url ?? s?.logo_url ?? s?.logo ?? undefined;
+  const logoUrl = s?.company_logo_url ?? s?.logo_url ?? s?.logo ?? undefined;
 
   let logoBase64 = base64Directo as string | undefined;
   if (!logoBase64 && logoUrl) {
@@ -180,10 +239,10 @@ const GrifoNewSale: React.FC = () => {
   const [selectedNozzleId, setSelectedNozzleId] = useState<number | null>(null);
   const [showNozzleModal, setShowNozzleModal] = useState(false);
   const [nozzlesForModal, setNozzlesForModal] = useState<NozzleInGroup[]>([]);
-  
+
   // Tarjetas fusionadas tanque+boquilla
   const [mergedCards, setMergedCards] = useState<Array<{ nozzle_id: number | null; producto: Product; disabled?: boolean }>>([]);
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -203,12 +262,12 @@ const GrifoNewSale: React.FC = () => {
 
   // ===== NUEVO: cache de encabezado de empresa para el PDF
   const [empresaInfo, setEmpresaInfo] = useState<EmpresaHeader | null>(null);
-  
+
   // ===== NUEVO: descuentos de configuración
   const [discounts, setDiscounts] = useState<ConfigDiscount[]>([]);
   const [selectedDiscountId, setSelectedDiscountId] = useState<number | null>(null);
   const [customDiscountRate, setCustomDiscountRate] = useState<number | null>(null);
-  
+
   const RECENT_LIMIT = 25;
 
   /** Paginación local */
@@ -466,7 +525,7 @@ const GrifoNewSale: React.FC = () => {
           const name = String(
             p?.pump_name ?? p?.nombre ?? p?.pump_number ?? `Surtidor ${String(num).padStart(3, '0')}`
           );
-            return { pump_id: id, pump_name: name, nozzles: [] };
+          return { pump_id: id, pump_name: name, nozzles: [] };
         });
 
         setPumpList(pumpObjects);
@@ -490,8 +549,8 @@ const GrifoNewSale: React.FC = () => {
   /** Auto-refresh de ventas, productos, métodos de pago y caja */
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
-//const token = typeof window !== 'undefined' ? sessionStorage.getItem('token') : null;
-if (!token) { setRecentSales([]); return; }
+    //const token = typeof window !== 'undefined' ? sessionStorage.getItem('token') : null;
+    if (!token) { setRecentSales([]); return; }
 
 
     refreshRecentSales();
@@ -764,9 +823,10 @@ if (!token) { setRecentSales([]); return; }
   /* ----------------------- Cliente (buscador) ----------------------- */
   const handleClientSelect = (client: Client) => {
     setSelectedClient(client);
-    setClientSearchTerm(`${client.nombre} ${client.apellido}`);
+    setClientSearchTerm(displayClientName(client));  // << antes era nombre + apellido
     setShowClientDropdown(false);
   };
+
 
   const toggleClientMode = () => {
     setShowClientSearch((prev) => {
@@ -789,16 +849,20 @@ if (!token) { setRecentSales([]); return; }
       .toLowerCase();
 
   const filterInList = (list: Client[], term: string) => {
-    const tnorm = normalize(term);
-    const isDni = /^\d{3,}$/.test(term.trim());
+    const raw = term.trim();
+    const tnorm = normalize(raw);
+    const isNumeric = /^\d{3,}$/.test(raw);
+
     return list
       .filter((c) => {
-        const full = normalize(`${c.nombre ?? ''} ${c.apellido ?? ''}`);
-        const doc = String(c.documento ?? '');
-        return isDni ? doc.includes(term.trim()) : full.includes(tnorm);
+        const label = normalize(displayClientName(c));
+        const doc = displayClientDoc(c);
+        if (isNumeric) return doc.includes(raw);
+        return label.includes(tnorm) || doc.toLowerCase().includes(tnorm);
       })
       .slice(0, 20);
   };
+
 
   useEffect(() => {
     if (!showClientSearch) return;
@@ -959,7 +1023,7 @@ if (!token) { setRecentSales([]); return; }
         if (!selectedClient) { setError('Para ventas a crédito, seleccione un cliente.'); return; }
         if (!dueDate) { setError('Seleccione la fecha de vencimiento del crédito.'); return; }
       }
-      
+
       // 6: Validaciones mínimas
       if (paymentMethod === 'CREDIT' && selectedClient && isCompany(selectedClient) && !selectedDriver) {
         setError('Para ventas a crédito de empresa, selecciona un conductor.');
@@ -1027,7 +1091,7 @@ if (!token) { setRecentSales([]); return; }
       };
 
       if (paymentMethod === 'CREDIT' && dueDate) payload.due_date = dueDate;
-      
+
       // 5: Payload: enviar el conductor (si hay)
       if (selectedClient && isCompany(selectedClient) && selectedDriver) {
         payload.company_driver_id = Number(selectedDriver.driver_id);
@@ -1074,8 +1138,8 @@ if (!token) { setRecentSales([]); return; }
           client: sale.client?.name
             ? { name: sale.client.name }
             : (selectedClient
-                ? { name: `${selectedClient.nombre ?? ''} ${selectedClient.apellido ?? ''}`.trim() }
-                : undefined),
+              ? { name: `${selectedClient.nombre ?? ''} ${selectedClient.apellido ?? ''}`.trim() }
+              : undefined),
           items: [
             {
               product_name: selectedProduct?.nombre || 'Producto',
@@ -1090,7 +1154,7 @@ if (!token) { setRecentSales([]); return; }
           payment_method: { name: sale.payment_method } as any,
           notes: paymentMethod === 'CREDIT' ? 'Venta a crédito' : observations || undefined,
         };
-        
+
         // 8: PDF/Recibo (opcional pero recomendado)
         const driverLine = selectedDriver ? `Conductor: ${selectedDriver.full_name}${selectedDriver.plate ? ' · Placa: ' + selectedDriver.plate : ''}` : '';
         venta.notes = [venta.notes, driverLine].filter(Boolean).join(' | ');
@@ -1230,7 +1294,7 @@ if (!token) { setRecentSales([]); return; }
           pumpNameById.get(nz?.pump_id ?? -1) ??
           (nz?.pump_id ? `Surtidor ${nz.pump_id}` : 'Surtidor —');
         const unitPrice = nz?.unit_price ?? (productName ? priceByFuel[productName] ?? 0 : 0);
-        
+
         const finalNet = Number(s.final_amount ?? s.total_amount ?? 0);
         const discountAmount = Number.isFinite(Number(s.discount_amount))
           ? Number(s.discount_amount)
@@ -1311,8 +1375,8 @@ if (!token) { setRecentSales([]); return; }
       customDiscountRate != null
         ? customDiscountRate
         : (selectedDiscount?.amount ?? (
-            gallonsNum > 0 && Number(discount) > 0 ? Number(discount) / gallonsNum : 0
-          ));
+          gallonsNum > 0 && Number(discount) > 0 ? Number(discount) / gallonsNum : 0
+        ));
     setTmpDiscountRate(String((+baseRate).toFixed(2)));
     setTmpObs(observations);
     setExtrasOpen(true);
@@ -1413,10 +1477,15 @@ if (!token) { setRecentSales([]); return; }
                       onClick={() => { handleClientSelect(client); }}
                       className="block w-full px-3 py-1.5 text-left text-white hover:bg-slate-700"
                     >
-                      <div className="font-medium truncate">{client.nombre} {client.apellido}</div>
-                      <div className="text-[11px] text-slate-400">{client.documento}</div>
+                      <div className="font-medium truncate">
+                        {displayClientName(client)}   {/* << antes: {client.nombre} {client.apellido} */}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {displayClientDoc(client)}    {/* << documento unificado */}
+                      </div>
                     </button>
                   ))}
+
                 </div>
               )}
             </div>
@@ -1523,19 +1592,19 @@ if (!token) { setRecentSales([]); return; }
                     return (
                       <button
                         key={`${p.id}-${noz.nozzle_id ?? 'x'}`}
-                          onClick={() => {
-                            if (disabled) {
-                              setError('Este producto está configurado en inventario pero no tiene boquilla asignada en este surtidor.');
-                              return;
-                            }
-                            const formattedProduct: Product = {
-                              id: Number(p.id),
-                              nombre: String(p.nombre),
-                              precio: Number(p.precio),
-                              tipo: String(p.tipo),
-                            };
-                            handleProductSelect(formattedProduct);
-                          }}
+                        onClick={() => {
+                          if (disabled) {
+                            setError('Este producto está configurado en inventario pero no tiene boquilla asignada en este surtidor.');
+                            return;
+                          }
+                          const formattedProduct: Product = {
+                            id: Number(p.id),
+                            nombre: String(p.nombre),
+                            precio: Number(p.precio),
+                            tipo: String(p.tipo),
+                          };
+                          handleProductSelect(formattedProduct);
+                        }}
                         disabled={disabled}
                         className={[
                           base,
@@ -1828,10 +1897,10 @@ if (!token) { setRecentSales([]); return; }
                         <div className="flex items-center gap-1.5">
                           <span
                             className={`rounded-full px-2 py-0.5 text-xs font-semibold ${status === 'completed'
-                                ? 'bg-green-700 text-white'
-                                : status === 'pending'
-                                  ? 'bg-yellow-700 text-white'
-                                  : 'bg-red-700 text-white'
+                              ? 'bg-green-700 text-white'
+                              : status === 'pending'
+                                ? 'bg-yellow-700 text-white'
+                                : 'bg-red-700 text-white'
                               }`}
                           >
                             {status === 'completed' ? 'Completada' : 'Pendiente'}
@@ -1866,8 +1935,8 @@ if (!token) { setRecentSales([]); return; }
                       key={n}
                       onClick={() => setCurrentPage(n)}
                       className={`rounded-md border px-2 py-1 text-xs ${currentPage === n
-                          ? 'border-orange-500 bg-orange-500 text-white'
-                          : 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        ? 'border-orange-500 bg-orange-500 text-white'
+                        : 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
                         }`}
                     >
                       {n}
@@ -2036,7 +2105,7 @@ if (!token) { setRecentSales([]); return; }
               placeholder="0.30"
             />
             <div className="mt-1 text-[11px] text-slate-400">
-              * Calculado: S/ {(Number(tmpDiscountRate)||0).toFixed(2)} × {gallonsNum.toFixed(2)} gal = <b>S/ {((Number(tmpDiscountRate)||0)*gallonsNum).toFixed(2)}</b>
+              * Calculado: S/ {(Number(tmpDiscountRate) || 0).toFixed(2)} × {gallonsNum.toFixed(2)} gal = <b>S/ {((Number(tmpDiscountRate) || 0) * gallonsNum).toFixed(2)}</b>
             </div>
           </div>
 
@@ -2075,11 +2144,10 @@ if (!token) { setRecentSales([]); return; }
               <button
                 key={opt.key}
                 onClick={() => { handlePaymentSelect(opt.key); setPaymentsOpen(false); }}
-                className={`w-full min-h-[40px] rounded-md px-3 py-2 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-orange-400/30 ${
-                  paymentMethod === opt.key
+                className={`w-full min-h-[40px] rounded-md px-3 py-2 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-orange-400/30 ${paymentMethod === opt.key
                     ? 'bg-orange-500 text-white'
                     : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
-                }`}
+                  }`}
               >
                 <span className="truncate">{opt.label}</span>
               </button>
