@@ -327,7 +327,7 @@ const GrifoNewSale: React.FC = () => {
       setCreditPays([]);
       setCreditPaysTotal(0);
     } finally {
-      setCreditPaysLoading(false);
+           setCreditPaysLoading(false);
     }
   };
 
@@ -601,7 +601,7 @@ const GrifoNewSale: React.FC = () => {
       } catch {
         setDrivers([]);
       } finally {
-        setDriversLoading(false);
+               setDriversLoading(false);
       }
     })();
   }, [selectedClient]);
@@ -982,7 +982,7 @@ const GrifoNewSale: React.FC = () => {
 
   /* --------------------- Totales (payload) --------------------- */
   const totalsForPayload = useMemo(() => {
-    const qty = Number(quantity) || 0;
+       const qty = Number(quantity) || 0;
     const price = selectedProduct?.precio || 0;
     const disc = Number(discount) || 0;
     const total_amount = qty * price;
@@ -1869,7 +1869,7 @@ const GrifoNewSale: React.FC = () => {
 
                   return (
                     <div key={key} className="grid grid-cols-1 gap-1.5 py-1.5 sm:grid-cols-5 sm:items-center">
-                      <div className="col-span-2 flex itemsCenter gap-2 min-w-0">
+                      <div className="col-span-2 flex items-center gap-2 min-w-0">
                         <div className="grid h-6 w-6 place-items-center rounded-full bg-slate-600 text-xs font-bold text-white shrink-0">
                           {String(clientName).charAt(0)?.toUpperCase() || 'C'}
                         </div>
@@ -1976,7 +1976,7 @@ const GrifoNewSale: React.FC = () => {
 
                   return (
                     <div key={it.paymentId} className="grid grid-cols-1 gap-1.5 py-1.5 sm:grid-cols-4 sm:items-center">
-                      <div className="col-span-2 flex itemsCenter gap-2 min-w-0">
+                      <div className="col-span-2 flex items-center gap-2 min-w-0">
                         <div className="text-sm text-slate-300 min-w-0">
                           <div className="font-medium text-white leading-tight truncate">{clientName}</div>
                           <div className="text-xs text-slate-400 truncate">

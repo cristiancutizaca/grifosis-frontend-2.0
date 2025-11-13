@@ -93,7 +93,6 @@ export async function generarReciboPDF({
 
   // ===== Encabezado =====
   if (formato === 'ticket80') {
-    // Datos empresa más compactos y margen extra antes del título
     if (empresa.logoBase64) {
       try { doc.addImage(empresa.logoBase64, 'PNG', leftX, y, 20, 20); } catch {}
     }
@@ -101,12 +100,11 @@ export async function generarReciboPDF({
     doc.setFont('helvetica','bold'); doc.setFontSize(11);
     doc.text(empresa.nombre, textX, y + 6);
     doc.setFont('helvetica','normal'); doc.setFontSize(9);
-    let infoY = y + 11; // líneas más pegadas entre sí
+    let infoY = y + 11;
     if (empresa.ruc)        { doc.text(`RUC: ${empresa.ruc}`, textX, infoY); infoY += 4.5; }
     if (empresa.direccion)  { doc.text(empresa.direccion, textX, infoY, { maxWidth: rightX - textX }); infoY += 4.5; }
     if (empresa.telefono)   { doc.text(`Tel: ${empresa.telefono}`, textX, infoY); infoY += 4.5; }
 
-    // Margen extra antes del título para que el Tel no quede pegado
     y = Math.max(y + 20, infoY) + 4;
 
     doc.setFont('helvetica','bold'); doc.setFontSize(10);
@@ -124,17 +122,16 @@ export async function generarReciboPDF({
 
     hr();
   } else {
-    // A4: logo a la izquierda y bloque de texto compacto a la derecha
     const hasLogo = !!empresa.logoBase64;
     const logoSize = 110; // pt
-    const gapLogoText = 24; // separación horizontal entre logo y texto
+    const gapLogoText = 24;
     if (hasLogo) {
       try { doc.addImage(empresa.logoBase64 as string, 'PNG', leftX, y, logoSize, logoSize); } catch {}
     }
 
     const textX = hasLogo ? leftX + logoSize + gapLogoText : leftX;
-    let line = y + 18;          // línea base
-    const infoGap = 18;         // líneas más juntas (pero legibles)
+    let line = y + 18;
+    const infoGap = 18;
 
     doc.setFont('helvetica','bold'); doc.setFontSize(26);
     doc.text(empresa.nombre, textX, line); line += infoGap;
@@ -144,9 +141,8 @@ export async function generarReciboPDF({
     if (empresa.direccion) { doc.text(empresa.direccion, textX, line); line += infoGap; }
     if (empresa.telefono)  { doc.text(`Tel: ${empresa.telefono}`, textX, line); line += infoGap; }
 
-    // Margen extra entre bloque empresa y el título
     const blockBottom = hasLogo ? Math.max(y + logoSize, line) : line;
-    y = blockBottom + 18; // aire extra para que Tel no quede pegado
+    y = blockBottom + 18;
 
     doc.setFont('helvetica','bold'); doc.setFontSize(28);
     doc.text(`RECIBO VENTA #${venta.sale_id}`, leftX, y); 
@@ -189,17 +185,40 @@ export async function generarReciboPDF({
   // ===== Resumen =====
   hr();
 
-  // Cálculo robusto del descuento (diseño intacto)
+  // Preferir descuento explícito; si no, inferir con tolerancia y mandar residuos a metadatos
+  const THRESHOLD_EXPLICITO = 0.01; // mostrar cuando viene explícito y es >= 0.01
+  const EPS_REDONDEO = 0.50;        // residuos < 0.50 se ocultan en recibo
+
   const N = (v: any) => Number(v ?? 0);
   const totalC = N(venta.total_amount);
-  const descDelDTO = N(venta.discount_amount);
+  const descExp = N(venta.discount_amount);
+
   const itemsGross = venta.items.reduce((s, it) => s + N(it.quantity) * N(it.unit_price), 0);
   let brutoPre = N(venta.gross_amount);
-  if (!(brutoPre > 0)) brutoPre = itemsGross > 0 ? itemsGross : totalC + descDelDTO;
-  let descuento = descDelDTO > 0 ? descDelDTO : Math.max(0, brutoPre - totalC);
+  if (!(brutoPre > 0)) brutoPre = itemsGross > 0 ? itemsGross : totalC + descExp;
 
-  // Orden: Descuento (info) -> Subtotal -> IGV -> TOTAL
-  row('Descuento aplicado', `${amount(descuento)}`);
+  const descInf = Math.max(0, brutoPre - totalC);
+
+  let descuentoMostrado = 0;
+  let residuoRedondeo = 0;
+
+  if (descExp >= THRESHOLD_EXPLICITO) {
+    // usar lo que vino del backend y considerar como residuo cualquier diferencia menor
+    descuentoMostrado = descExp;
+    residuoRedondeo = Math.max(0, descInf - descExp);
+  } else {
+    // si no vino explícito, usar inferido sólo si es lo bastante grande
+    if (descInf >= EPS_REDONDEO) {
+      descuentoMostrado = descInf;
+      residuoRedondeo = 0;
+    } else {
+      descuentoMostrado = 0;
+      residuoRedondeo = descInf; // se manda a metadatos (no visible)
+    }
+  }
+
+  // Orden visible: Descuento -> Subtotal -> IGV -> TOTAL
+  row('Descuento aplicado', `${amount(descuentoMostrado)}`);
   row('Sub Total (con desc.)', N(venta.subtotal_amount));
   row(`IGV (${Math.round(igvRate * 100)}%)`, N(venta.igv_amount));
   doc.setFont('helvetica', 'bold');
@@ -214,6 +233,15 @@ export async function generarReciboPDF({
     doc.setFont('helvetica', 'normal'); doc.setFontSize(12);
     doc.text('Documento no fiscal. Comprobante interno.', leftX, y + 2);
   }
+
+  // Guardar el residuo en metadatos del PDF (no visible en el recibo)
+  try {
+    const resTxt = `sale_id=${venta.sale_id};residuo_descuento=${f2(residuoRedondeo)};moneda=${moneda}`;
+    doc.setProperties({
+      subject: resTxt,
+      keywords: resTxt,
+    });
+  } catch { /* noop */ }
 
   doc.save(fileName || `RECIBO_${venta.sale_id}.pdf`);
 }
